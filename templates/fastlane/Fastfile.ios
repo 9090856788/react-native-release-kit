@@ -1,0 +1,27 @@
+default_platform(:ios)
+
+platform :ios do
+  desc "Build and upload to Apple TestFlight"
+  lane :beta do
+    # Authenticate with App Store Connect using API Key
+    if ENV["APP_STORE_CONNECT_API_KEY_KEY_ID"] && ENV["APP_STORE_CONNECT_API_KEY_ISSUER_ID"] && ENV["APP_STORE_CONNECT_API_KEY_KEY_CONTENT"]
+      app_store_connect_api_key(
+        key_id: ENV["APP_STORE_CONNECT_API_KEY_KEY_ID"],
+        issuer_id: ENV["APP_STORE_CONNECT_API_KEY_ISSUER_ID"],
+        key_content: ENV["APP_STORE_CONNECT_API_KEY_KEY_CONTENT"],
+        is_key_content_base64: true,
+        in_house: false
+      )
+    end
+
+    build_app(
+      workspace: ENV["IOS_WORKSPACE"] || "ios/App.xcworkspace",
+      scheme: ENV["IOS_SCHEME"] || "App",
+      export_method: "app-store"
+    )
+
+    upload_to_testflight(
+      skip_waiting_for_build_processing: true
+    )
+  end
+end

@@ -1,0 +1,11 @@
+# Fastlane Appfile
+# Configured via environment variables for zero secret commits
+
+json_key_file(ENV["SUPPLY_JSON_KEY"]) if ENV["SUPPLY_JSON_KEY"]
+package_name(ENV["ANDROID_PACKAGE_NAME"]) if ENV["ANDROID_PACKAGE_NAME"]
+
+app_identifier(ENV["IOS_BUNDLE_IDENTIFIER"]) if ENV["IOS_BUNDLE_IDENTIFIER"]
+apple_id(ENV["APPLE_ID"]) if ENV["APPLE_ID"]
+itc_team_id(ENV["ITC_TEAM_ID"]) if ENV["ITC_TEAM_ID"]
+team_id(ENV["TEAM_ID"]) if ENV["TEAM_ID"]
+

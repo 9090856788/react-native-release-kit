@@ -1,0 +1,20 @@
+default_platform(:android)
+
+platform :android do
+  desc "Build and deploy to Google Play Internal track"
+  lane :deploy_internal do
+    gradle(
+      task: "bundleRelease",
+      project_dir: "android/"
+    )
+
+    upload_to_play_store(
+      track: "internal",
+      release_status: "draft",
+      skip_upload_metadata: true,
+      skip_upload_images: true,
+      skip_upload_screenshots: true
+    )
+  end
+end
+

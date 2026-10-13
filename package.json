@@ -1,0 +1,87 @@
+{
+  "name": "react-native-release-kit",
+  "version": "0.1.0",
+  "description": "Production-ready CI/CD configuration, native builds, and store deployment for React Native CLI applications",
+  "keywords": [
+    "react-native",
+    "ci-cd",
+    "release",
+    "deployment",
+    "github-actions",
+    "fastlane",
+    "android",
+    "ios"
+  ],
+  "homepage": "https://github.com/react-native-release-kit/react-native-release-kit#readme",
+  "bugs": {
+    "url": "https://github.com/react-native-release-kit/react-native-release-kit/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/react-native-release-kit/react-native-release-kit.git"
+  },
+  "license": "MIT",
+  "author": "react-native-release-kit contributors",
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      },
+      "require": {
+        "types": "./dist/index.d.cts",
+        "default": "./dist/index.cjs"
+      }
+    }
+  },
+  "bin": {
+    "react-native-release-kit": "./bin/react-native-release-kit.js"
+  },
+  "files": [
+    "dist",
+    "bin",
+    "templates",
+    "README.md",
+    "LICENSE",
+    "CHANGELOG.md"
+  ],
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "scripts": {
+    "build": "tsup",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint \"src/**/*.ts\" \"tests/**/*.ts\"",
+    "lint:fix": "eslint \"src/**/*.ts\" \"tests/**/*.ts\" --fix",
+    "format": "prettier --write \"src/**/*.ts\" \"tests/**/*.ts\"",
+    "format:check": "prettier --check \"src/**/*.ts\" \"tests/**/*.ts\"",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "prepublishOnly": "npm run typecheck && npm run test && npm run build"
+  },
+  "dependencies": {
+    "@inquirer/prompts": "^7.3.2",
+    "commander": "^13.1.0",
+    "diff": "^9.0.0",
+    "execa": "^9.5.2",
+    "jiti": "^2.4.2",
+    "picocolors": "^1.1.1",
+    "zod": "^3.24.2"
+  },
+  "devDependencies": {
+    "@types/diff": "^7.0.0",
+    "@types/node": "^22.13.9",
+    "@typescript-eslint/eslint-plugin": "^8.26.0",
+    "@typescript-eslint/parser": "^8.26.0",
+    "eslint": "^9.21.0",
+    "prettier": "^3.5.3",
+    "tsup": "^8.4.0",
+    "typescript": "^5.8.2",
+    "vitest": "^3.0.7"
+  }
+}
