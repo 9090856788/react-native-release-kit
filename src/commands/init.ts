@@ -4,6 +4,7 @@ import { existsSync } from 'node:fs';
 import pc from 'picocolors';
 import { input, select, confirm } from '@inquirer/prompts';
 import { detectProject } from '../detector/project.js';
+import { hasUnresolvedXcodeMacro } from '../detector/ios.js';
 import { findAllConfigFiles } from '../config/loader.js';
 import { getDefaultScripts } from '../config/defaults.js';
 import { safeWriteFile, readFileUtf8 } from '../utils/fs.js';
@@ -56,14 +57,23 @@ export async function initCommand(options: InitCommandOptions = {}): Promise<num
     logger.warn('Continuing anyway, but standard CLI paths might differ.');
   }
 
-  if (
-    detected.ios.hasIOS &&
-    detected.ios.bundleId &&
-    (detected.ios.hasUnresolvedBundleIdMacro || detected.ios.isPlaceholderBundleId)
-  ) {
-    logger.warn(
-      `Detected iOS bundle identifier "${detected.ios.bundleId}" contains an unresolved Xcode macro or placeholder. Update "ios.bundleId" in ${targetFileName} before production iOS release.`,
-    );
+  const hasMacroInDetectedBundleId = Boolean(
+    detected.ios.hasUnresolvedBundleIdMacro ||
+    (detected.ios.bundleId && hasUnresolvedXcodeMacro(detected.ios.bundleId)),
+  );
+  const reliableDetectedBundleId =
+    detected.ios.bundleId && !hasMacroInDetectedBundleId ? detected.ios.bundleId : undefined;
+
+  if (detected.ios.hasIOS && detected.ios.bundleId) {
+    if (hasMacroInDetectedBundleId) {
+      logger.warn(
+        `Detected iOS bundle identifier "${detected.ios.bundleId}" contains an unresolved Xcode macro. Omitted "ios.bundleId" from ${targetFileName}. Specify a concrete reverse-DNS bundle identifier in ${targetFileName} before production iOS release.`,
+      );
+    } else if (detected.ios.isPlaceholderBundleId) {
+      logger.warn(
+        `Detected iOS bundle identifier "${detected.ios.bundleId}" is a placeholder. Update "ios.bundleId" in ${targetFileName} before production iOS release.`,
+      );
+    }
   }
 
   // Check if any existing config file exists
@@ -112,7 +122,7 @@ export async function initCommand(options: InitCommandOptions = {}): Promise<num
         enabled: detected.ios.hasIOS,
         buildArtifact: 'ipa',
         scheme: detected.ios.schemes[0] || detected.projectName,
-        bundleId: detected.ios.bundleId,
+        ...(reliableDetectedBundleId ? { bundleId: reliableDetectedBundleId } : {}),
         exportMethod: 'app-store',
         packagePath: 'ios',
       },
@@ -141,7 +151,6 @@ export async function initCommand(options: InitCommandOptions = {}): Promise<num
         },
         ios: {
           appStoreConnectKeyContentSecretName: 'APP_STORE_CONNECT_API_KEY_KEY_CONTENT',
-          appStoreConnectApiKeySecretName: 'APP_STORE_CONNECT_API_KEY_KEY_CONTENT',
           appStoreConnectKeyIdSecretName: 'APP_STORE_CONNECT_API_KEY_KEY_ID',
           appStoreConnectIssuerIdSecretName: 'APP_STORE_CONNECT_API_KEY_ISSUER_ID',
         },
@@ -223,11 +232,11 @@ export async function initCommand(options: InitCommandOptions = {}): Promise<num
       default: detected.ios.hasIOS,
     });
 
-    let iosConfig = {
+    let iosConfig: ReleaseKitUserConfig['ios'] = {
       enabled: false,
       buildArtifact: 'ipa' as const,
       scheme: detected.ios.schemes[0] || projectName,
-      bundleId: detected.ios.bundleId,
+      ...(reliableDetectedBundleId ? { bundleId: reliableDetectedBundleId } : {}),
       exportMethod: 'app-store' as IOSExportMethod,
       packagePath: 'ios',
     };
@@ -239,9 +248,21 @@ export async function initCommand(options: InitCommandOptions = {}): Promise<num
       });
 
       const bundleId = await input({
-        message: 'iOS Bundle Identifier:',
-        default: detected.ios.bundleId || 'com.example.app',
+        message: 'iOS Bundle Identifier (reverse-DNS, e.g. com.company.app):',
+        ...(reliableDetectedBundleId ? { default: reliableDetectedBundleId } : {}),
       });
+
+      const trimmedBundleId = bundleId.trim();
+      let finalInteractiveBundleId: string | undefined = undefined;
+      if (trimmedBundleId) {
+        if (hasUnresolvedXcodeMacro(trimmedBundleId)) {
+          logger.warn(
+            `Entered iOS bundle identifier "${trimmedBundleId}" contains an unresolved Xcode macro and was omitted from the configuration.`,
+          );
+        } else {
+          finalInteractiveBundleId = trimmedBundleId;
+        }
+      }
 
       const exportMethod = await select<IOSExportMethod>({
         message: 'iOS export method:',
@@ -258,7 +279,7 @@ export async function initCommand(options: InitCommandOptions = {}): Promise<num
         enabled: true,
         buildArtifact: 'ipa',
         scheme,
-        bundleId,
+        ...(finalInteractiveBundleId ? { bundleId: finalInteractiveBundleId } : {}),
         exportMethod,
         packagePath: 'ios',
       };
@@ -296,7 +317,6 @@ export async function initCommand(options: InitCommandOptions = {}): Promise<num
         },
         ios: {
           appStoreConnectKeyContentSecretName: 'APP_STORE_CONNECT_API_KEY_KEY_CONTENT',
-          appStoreConnectApiKeySecretName: 'APP_STORE_CONNECT_API_KEY_KEY_CONTENT',
           appStoreConnectKeyIdSecretName: 'APP_STORE_CONNECT_API_KEY_KEY_ID',
           appStoreConnectIssuerIdSecretName: 'APP_STORE_CONNECT_API_KEY_ISSUER_ID',
         },

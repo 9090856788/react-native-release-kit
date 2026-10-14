@@ -30,6 +30,8 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # Baseline quality checks. When generated dynamically by release-kit,
+      # checks are omitted if the corresponding script is missing or an unconfigured placeholder.
       - name: Run Lint
         run: npm run lint
 

@@ -5,6 +5,7 @@ import { existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { generateConfigFileContent, initCommand } from '../../src/commands/init.js';
 import { loadConfig } from '../../src/config/loader.js';
+import { createDefaultConfig } from '../../src/config/index.js';
 
 describe('Init Command', () => {
   let testDir: string;
@@ -198,5 +199,96 @@ describe('Init Command', () => {
     expect(loaded.config?.scripts.lint).toBe('npm run lint');
     expect(loaded.config?.scripts.test).toBe('npm test');
     expect(loaded.config?.scripts.typecheck).toBeUndefined();
+  });
+
+  it('omits bundleId with unresolved Xcode macro during init --yes and omits duplicate secret', async () => {
+    await fs.writeFile(
+      path.join(testDir, 'package.json'),
+      JSON.stringify({
+        name: 'macro-app',
+        dependencies: { 'react-native': '0.76.2' },
+      }),
+    );
+    const xcodeDir = path.join(testDir, 'ios', 'MacroApp.xcodeproj');
+    await fs.mkdir(xcodeDir, { recursive: true });
+    await fs.writeFile(
+      path.join(xcodeDir, 'project.pbxproj'),
+      `
+/* Begin XCBuildConfiguration section */
+		13B07F941A680F5B00A75B9A /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				PRODUCT_BUNDLE_IDENTIFIER = "org.reactjs.native.example.$(PRODUCT_NAME:rfc1034identifier)";
+				PRODUCT_NAME = MacroApp;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+`,
+    );
+
+    const exitCode = await initCommand({
+      cwd: testDir,
+      yes: true,
+    });
+
+    expect(exitCode).toBe(0);
+    const tsConfigPath = path.join(testDir, 'react-native-release.config.ts');
+    const content = await fs.readFile(tsConfigPath, 'utf-8');
+    expect(content).not.toContain('PRODUCT_NAME:rfc1034identifier');
+    expect(content).not.toContain('appStoreConnectApiKeySecretName');
+
+    const loaded = await loadConfig(testDir);
+    expect(loaded.config?.ios.bundleId).toBeUndefined();
+    expect(loaded.config?.signing.ios.appStoreConnectKeyContentSecretName).toBe(
+      'APP_STORE_CONNECT_API_KEY_KEY_CONTENT',
+    );
+    const rawDefault = createDefaultConfig('macro-app');
+    expect(
+      Object.prototype.hasOwnProperty.call(
+        rawDefault.signing.ios,
+        'appStoreConnectApiKeySecretName',
+      ),
+    ).toBe(false);
+  });
+
+  it('preserves valid concrete bundleId during init --yes', async () => {
+    await fs.writeFile(
+      path.join(testDir, 'package.json'),
+      JSON.stringify({
+        name: 'concrete-app',
+        dependencies: { 'react-native': '0.76.2' },
+      }),
+    );
+    const xcodeDir = path.join(testDir, 'ios', 'ConcreteApp.xcodeproj');
+    await fs.mkdir(xcodeDir, { recursive: true });
+    await fs.writeFile(
+      path.join(xcodeDir, 'project.pbxproj'),
+      `
+/* Begin XCBuildConfiguration section */
+		13B07F941A680F5B00A75B9A /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				PRODUCT_BUNDLE_IDENTIFIER = "com.realcompany.app";
+				PRODUCT_NAME = ConcreteApp;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+`,
+    );
+
+    const exitCode = await initCommand({
+      cwd: testDir,
+      yes: true,
+    });
+
+    expect(exitCode).toBe(0);
+    const tsConfigPath = path.join(testDir, 'react-native-release.config.ts');
+    const content = await fs.readFile(tsConfigPath, 'utf-8');
+    expect(content).toContain('com.realcompany.app');
+
+    const loaded = await loadConfig(testDir);
+    expect(loaded.config?.ios.bundleId).toBe('com.realcompany.app');
   });
 });

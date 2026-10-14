@@ -30,6 +30,8 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # Baseline quality checks. When generated dynamically by release-kit,
+      # checks are omitted if the corresponding script is missing or an unconfigured placeholder.
       - name: Run Lint
         run: npm run lint
 
@@ -73,7 +75,7 @@ jobs:
       - name: Upload Android Build Artifact
         uses: actions/upload-artifact@4cec3d8aa04e39d1a68397de0c4cd6fb9dce8ec1 # v4.6.1
         with:
-          name: android-${{ github.sha }}-aab
+          name: android-debug-${{ github.sha }}-aab
           path: android/app/build/outputs/bundle/debug/*.aab
           if-no-files-found: error
           retention-days: 14

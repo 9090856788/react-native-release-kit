@@ -110,6 +110,14 @@ interface QualityCheckResolution {
   warnings: string[];
 }
 
+function isPlaceholderTestScript(cmd?: string): boolean {
+  if (!cmd) return false;
+  const lower = cmd.toLowerCase().trim();
+  return (
+    lower.includes('no test specified') && (lower.includes('exit 1') || lower.includes('error:'))
+  );
+}
+
 function resolveQualityChecks(
   config: ReleaseKitConfig,
   project: ProjectDetectionResult,
@@ -161,8 +169,15 @@ function resolveQualityChecks(
 
       if (referencedScript !== null) {
         // Command invokes a package.json script — verify that script exists in package.json
-        if (pkgScripts[referencedScript]) {
-          steps.push(`      - name: ${check.stepName}\n        run: ${configuredCmd}`);
+        const scriptBody = pkgScripts[referencedScript];
+        if (scriptBody) {
+          if (check.key === 'test' && isPlaceholderTestScript(scriptBody)) {
+            warnings.push(
+              `Skipped test step: package.json script "${referencedScript}" is an unconfigured default placeholder ("${scriptBody}").`,
+            );
+          } else {
+            steps.push(`      - name: ${check.stepName}\n        run: ${configuredCmd}`);
+          }
         } else {
           const isStandardDefault =
             (check.key === 'lint' && configuredCmd === `${runner} lint`) ||
@@ -181,9 +196,16 @@ function resolveQualityChecks(
       // Not explicitly configured in config.scripts — check if package.json defines the script
       const foundScript = check.defaultScriptNames.find((name) => Boolean(pkgScripts[name]));
       if (foundScript) {
-        steps.push(
-          `      - name: ${check.stepName}\n        run: ${check.defaultCmd(foundScript)}`,
-        );
+        const scriptBody = pkgScripts[foundScript];
+        if (check.key === 'test' && isPlaceholderTestScript(scriptBody)) {
+          warnings.push(
+            `Skipped test step: package.json script "${foundScript}" is an unconfigured default placeholder ("${scriptBody}").`,
+          );
+        } else {
+          steps.push(
+            `      - name: ${check.stepName}\n        run: ${check.defaultCmd(foundScript)}`,
+          );
+        }
       }
     }
   }
@@ -355,7 +377,7 @@ ${pmSteps}
       - name: Upload Android Build Artifact
         uses: ${GITHUB_ACTIONS_SHAS.uploadArtifact}
         with:
-          name: android-\${{ github.sha }}-${artifactType}
+          name: android-debug-\${{ github.sha }}-${artifactType}
           path: ${artifactPath}
           if-no-files-found: error
           retention-days: ${retentionDays}`;
@@ -462,10 +484,11 @@ export function generateReleaseTagWorkflow(
   const isSigningEnabled = config.signing.android.enabled || isStorePublishing;
 
   let signingPrepareStep = '';
+  let signingNoticeStep = '';
   let buildEnvBlock = '';
   let signingCleanupStep = '';
 
-  if (config.signing.android.enabled) {
+  if (isSigningEnabled) {
     signingPrepareStep = `
       - name: Provision Android Signing Keystore
         env:
@@ -522,6 +545,13 @@ export function generateReleaseTagWorkflow(
       - name: Cleanup Signing Keystore
         if: always()
         run: rm -f "$RUNNER_TEMP/release.keystore"`;
+  } else {
+    signingNoticeStep = `
+      - name: Android Release Signing Notice
+        run: |
+          echo "::notice::Automated keystore provisioning is disabled (signing.android.enabled: false). The release build will rely on your project's Gradle signing configuration or produce an unsigned artifact."
+
+`;
   }
 
   let storePublishingSection = '';
@@ -602,7 +632,7 @@ ${pmSteps}
 
       - name: Grant execute permission for gradlew
         run: chmod +x ${packagePath}/gradlew
-${signingPrepareStep}      - name: Build Android Release ${artifactType.toUpperCase()}
+${signingPrepareStep}${signingNoticeStep}      - name: Build Android Release ${artifactType.toUpperCase()}
 ${buildEnvBlock}        run: |
           cd ${packagePath}
           ./gradlew ${buildTask}

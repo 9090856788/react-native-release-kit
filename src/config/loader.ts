@@ -48,12 +48,22 @@ export function findConfigFile(cwd: string = process.cwd()): string | null {
 function resolvePackageEntryPath(): string {
   try {
     const currentDir = path.dirname(fileURLToPath(import.meta.url));
-    const candidates = [
-      path.resolve(currentDir, '../index.ts'),
-      path.resolve(currentDir, '../index.js'),
-      path.resolve(currentDir, '../../dist/index.js'),
-      path.resolve(currentDir, '../../dist/index.cjs'),
-    ];
+    const isCli = path.basename(currentDir) === 'cli';
+    const candidates = isCli
+      ? [
+          path.resolve(currentDir, '../index.js'),
+          path.resolve(currentDir, '../index.cjs'),
+          path.resolve(currentDir, '../../dist/index.js'),
+          path.resolve(currentDir, '../../dist/index.cjs'),
+        ]
+      : [
+          path.resolve(currentDir, '../index.ts'),
+          path.resolve(currentDir, '../index.js'),
+          path.resolve(currentDir, './index.js'),
+          path.resolve(currentDir, './index.cjs'),
+          path.resolve(currentDir, '../../dist/index.js'),
+          path.resolve(currentDir, '../../dist/index.cjs'),
+        ];
     for (const candidate of candidates) {
       if (existsSync(candidate)) {
         return candidate;

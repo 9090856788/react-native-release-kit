@@ -154,6 +154,47 @@ describe('GitHub Actions Workflow Generators', () => {
       expect(yaml).not.toContain('Run Typecheck');
       expect(yaml).not.toContain('Run Tests');
     });
+
+    it('skips placeholder test script and emits a warning during generation', async () => {
+      const config = createMockConfig();
+      const project = createMockProject({
+        scripts: {
+          lint: 'eslint .',
+          test: 'echo "Error: no test specified" && exit 1',
+        },
+      });
+
+      const yaml = generatePrValidationWorkflow(config, project);
+      expect(yaml).toContain('name: Run Lint');
+      expect(yaml).not.toContain('Run Tests');
+
+      const result = await generateGitHubWorkflows(config, project, '/fake/path');
+      expect(result.warnings.some((w) => w.includes('unconfigured default placeholder'))).toBe(
+        true,
+      );
+    });
+
+    it('skips explicitly configured test script when underlying script is a placeholder', async () => {
+      const config = createMockConfig({
+        scripts: {
+          ...getBaseConfig().scripts,
+          test: 'npm test',
+        },
+      });
+      const project = createMockProject({
+        scripts: {
+          test: 'echo "Error: no test specified" && exit 1',
+        },
+      });
+
+      const yaml = generatePrValidationWorkflow(config, project);
+      expect(yaml).not.toContain('Run Tests');
+
+      const result = await generateGitHubWorkflows(config, project, '/fake/path');
+      expect(result.warnings.some((w) => w.includes('unconfigured default placeholder'))).toBe(
+        true,
+      );
+    });
   });
 
   describe('Main Branch Build Workflow', () => {
@@ -196,6 +237,7 @@ describe('GitHub Actions Workflow Generators', () => {
       expect(yaml).toContain('./gradlew bundleDebug');
       expect(yaml).toContain(`uses: ${GITHUB_ACTIONS_SHAS.uploadArtifact}`);
       expect(yaml).toContain('path: android/app/build/outputs/bundle/debug/*.aab');
+      expect(yaml).toContain('name: android-debug-${{ github.sha }}-aab');
       expect(yaml).toContain('retention-days: 14');
       expect(yaml).toContain('if-no-files-found: error');
     });
@@ -213,7 +255,7 @@ describe('GitHub Actions Workflow Generators', () => {
       const yaml = generateMainBuildWorkflow(config, project);
       expect(yaml).toContain('./gradlew assembleDebug');
       expect(yaml).toContain('path: android/app/build/outputs/apk/debug/*.apk');
-      expect(yaml).toContain('name: android-${{ github.sha }}-apk');
+      expect(yaml).toContain('name: android-debug-${{ github.sha }}-apk');
     });
 
     it('omits Android build job when android.enabled is false', () => {
@@ -363,6 +405,9 @@ describe('GitHub Actions Workflow Generators', () => {
       expect(yaml).toContain('./gradlew bundleRelease');
       expect(yaml).toContain('path: android/app/build/outputs/bundle/release/*.aab');
       expect(yaml).toContain('Store publishing is disabled by default');
+      expect(yaml).toContain('name: Android Release Signing Notice');
+      expect(yaml).toContain('Automated keystore provisioning is disabled');
+      expect(yaml).not.toContain('Provision Android Signing Keystore');
     });
 
     it('supports storePublishing=true with Android secret validation', () => {
@@ -397,6 +442,39 @@ describe('GitHub Actions Workflow Generators', () => {
       expect(yaml).toContain('KEYSTORE_PASSWORD: ${{ secrets.CUSTOM_KEYSTORE_PWD }}');
       expect(yaml).toContain('KEY_ALIAS: ${{ secrets.CUSTOM_ALIAS }}');
       expect(yaml).toContain('KEY_PASSWORD: ${{ secrets.CUSTOM_ALIAS_PWD }}');
+      expect(yaml).toContain('Provision Android Signing Keystore');
+      expect(yaml).not.toContain('Android Release Signing Notice');
+      expect(yaml).toContain('Cleanup Signing Keystore');
+    });
+
+    it('omits signing notice and provisions keystore when signing.android.enabled is true and storePublishing is false', () => {
+      const config = createMockConfig({
+        android: {
+          ...getBaseConfig().android,
+          enabled: true,
+          buildArtifact: 'aab',
+        },
+        githubActions: {
+          ...getBaseConfig().githubActions,
+          storePublishing: false,
+        },
+        signing: {
+          ...getBaseConfig().signing,
+          android: {
+            ...getBaseConfig().signing.android,
+            enabled: true,
+          },
+        },
+      });
+      const project = createMockProject();
+
+      const yaml = generateReleaseTagWorkflow(config, project);
+      const validation = validateWorkflowYaml(yaml);
+
+      expect(validation.valid).toBe(true);
+      expect(yaml).toContain('Provision Android Signing Keystore');
+      expect(yaml).not.toContain('Android Release Signing Notice');
+      expect(yaml).toContain('Cleanup Signing Keystore');
     });
 
     it('includes production safeguard check in release-tag workflow when deploymentTrack is production and allowProductionPublish is false', () => {
