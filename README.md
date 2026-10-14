@@ -2,9 +2,10 @@
 
 > Production-ready CI/CD configuration, native builds, release signing, and store deployment automation for React Native CLI applications.
 
+[![npm version](https://img.shields.io/npm/v/react-native-release-kit.svg)](https://www.npmjs.com/package/react-native-release-kit)
+[![npm downloads](https://img.shields.io/npm/dm/react-native-release-kit.svg)](https://www.npmjs.com/package/react-native-release-kit)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 [![Node.js](https://img.shields.io/badge/node-%3E%3D18.0.0-brightgreen.svg)](https://nodejs.org/)
-[![npm version](https://img.shields.io/badge/npm-v1.0.0-blue.svg)](https://www.npmjs.com/package/react-native-release-kit)
 
 React Native developers frequently struggle with brittle CI/CD configurations, missing signing credentials on clean runners, unsafe debug signing in production, and cumbersome store publishing setups.
 
@@ -16,6 +17,29 @@ React Native developers frequently struggle with brittle CI/CD configurations, m
 - **Local Native Builds (`build`)**: Executes repository Gradle wrappers (`./gradlew`) with safe task resolution, temporary keystore provisioning, and artifact verification.
 - **Store Publishing & Safeguards (`deploy`)**: Publishes to Google Play tracks via Fastlane with built-in production rollout confirmation safeguards.
 - **Zero Secret Leakage**: Restricts temporary signing credentials to `0600` file permissions, registers process termination hooks, and masks secrets in all logs and child-process streams.
+
+---
+
+## Table of Contents
+
+- [Requirements & Compatibility](#requirements--compatibility)
+- [How to Use & Quick Start](#how-to-use--quick-start)
+  - [1. Installation](#1-installation)
+  - [2. Initialize Configuration (`init`)](#2-initialize-configuration-init)
+  - [3. Environment Diagnostics (`doctor`)](#3-environment-diagnostics-doctor)
+  - [4. Generate CI/CD & Fastlane Workflows (`setup`)](#4-generate-cicd--fastlane-workflows-setup)
+  - [5. Local Native Builds (`build`)](#5-local-native-builds-build)
+  - [6. Store Deployment (`deploy`)](#6-store-deployment-deploy)
+- [Local vs. CI Capabilities](#local-vs-ci-capabilities)
+- [CLI Commands](#cli-commands)
+- [Android Setup Guide](#android-setup-guide)
+- [iOS Setup Guide](#ios-setup-guide)
+- [Required GitHub Actions Secrets](#required-github-actions-secrets)
+- [Configuration Reference (`react-native-release.config.ts`)](#configuration-reference-react-native-releaseconfigts)
+- [Production Publishing Safeguards](#production-publishing-safeguards)
+- [Troubleshooting Guide](#troubleshooting-guide)
+- [Security Architecture](#security-architecture)
+- [License](#license)
 
 ---
 
@@ -34,25 +58,17 @@ React Native developers frequently struggle with brittle CI/CD configurations, m
 
 ---
 
-## Quick Start
+## How to Use & Quick Start
 
-You can run `react-native-release-kit` directly via `npx` without prior installation:
+### 1. Installation
+
+You can run `react-native-release-kit` on demand using `npx` without prior installation:
 
 ```bash
-# 1. Initialize configuration interactively
-npx react-native-release-kit init
-
-# 2. Check local environment and prerequisites
-npx react-native-release-kit doctor
-
-# 3. Generate CI/CD workflows and Fastlane deployment files
-npx react-native-release-kit setup --provider github-actions --fastlane
-
-# 4. Preview your Android release build task
-npx react-native-release-kit build --platform android --variant release --dry-run
+npx react-native-release-kit <command>
 ```
 
-Or install it as a development dependency:
+Or install it as a development dependency in your React Native project:
 
 ```bash
 # npm
@@ -66,6 +82,86 @@ pnpm add -D react-native-release-kit
 
 # bun
 bun add -d react-native-release-kit
+```
+
+---
+
+### 2. Initialize Configuration (`init`)
+
+Run `init` in your project root to auto-detect your project structure (package manager, Android Gradle modules/flavors, Xcode workspace/schemes) and create a type-safe `react-native-release.config.ts`:
+
+```bash
+# Interactive setup with guided prompts
+npx react-native-release-kit init
+
+# Or accept all auto-detected defaults non-interactively
+npx react-native-release-kit init --yes
+```
+
+---
+
+### 3. Environment Diagnostics (`doctor`)
+
+Validate that your developer workstation or CI runner meets all prerequisites:
+
+```bash
+# Run full environment health check
+npx react-native-release-kit doctor
+```
+
+`doctor` validates:
+- Node.js LTS version compatibility (`>= 18.0.0`)
+- React Native CLI project structure and dependencies
+- Java OpenJDK 17+ and `ANDROID_HOME` / SDK tools
+- macOS, Xcode, CocoaPods, and Command Line Tools (on macOS)
+- Release signing configurations and credential sanity
+
+---
+
+### 4. Generate CI/CD & Fastlane Workflows (`setup`)
+
+Generate production-hardened GitHub Actions workflows and unified Fastlane deployment configurations:
+
+```bash
+# Generate both GitHub Actions workflows and Fastlane deployment files
+npx react-native-release-kit setup --provider github-actions --fastlane
+
+# Preview the exact files to be created without writing to disk
+npx react-native-release-kit setup --provider github-actions --fastlane --dry-run
+```
+
+This creates:
+- `.github/workflows/pr-validation.yml`: Fast PR validation with concurrency cancellation and zero secret exposure.
+- `.github/workflows/main-build.yml`: Builds and archives Android validation artifacts and iOS simulator builds.
+- `.github/workflows/release-tag.yml`: Automated native builds, ephemeral signing keystore/keychain provisioning, and store publishing on git release tags (e.g. `v*`).
+- `fastlane/Appfile` & `fastlane/Fastfile`: Production-ready deployment lanes for Google Play and TestFlight.
+
+---
+
+### 5. Local Native Builds (`build`)
+
+Build native release artifacts locally using your project's Gradle wrapper and verified configurations:
+
+```bash
+# Build Android release App Bundle (.aab)
+npx react-native-release-kit build --platform android --variant release
+
+# Preview Gradle task and configuration resolution (safe dry-run)
+npx react-native-release-kit build --platform android --variant release --dry-run
+```
+
+---
+
+### 6. Store Deployment (`deploy`)
+
+Deploy release artifacts to app store distribution tracks:
+
+```bash
+# Deploy to Google Play Internal testing track
+npx react-native-release-kit deploy --platform android --track internal
+
+# Deploy to Google Play Production track (requires safeguard confirmation)
+npx react-native-release-kit deploy --platform android --track production --confirm-production
 ```
 
 ---
