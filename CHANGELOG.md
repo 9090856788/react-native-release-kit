@@ -5,6 +5,29 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0] - 2026-10-14
+
+### Added
+- **Stable 1.0.0 Release**:
+  - Full production CI/CD automation, native building, signing, and store deployment for bare React Native CLI applications.
+  - Multi-platform support for Android (AAB/APK via Gradle) and iOS (Archive/IPA via Fastlane & Xcodebuild).
+
+### Changed
+- **Workflow & Signing Hardening (`Phases H.4/H.5`)**:
+  - Omitted unresolved Xcode bundle ID macros (`$(...)`) during initialization to avoid generating invalid release configurations.
+  - Aligned Android debug validation artifact naming across dynamic workflow generation and static templates (`android-debug-${{ github.sha }}-aab`).
+  - Added warning notices in CI workflows when automated Android release signing is disabled.
+  - Enforced signing configuration prerequisites when store publishing is enabled.
+  - Configured generated CI workflows to skip unconfigured default test scripts with clear warnings.
+  - Removed duplicate iOS signing secret configuration property (`signing.ios.appleCertificatePassword`) from generated configuration defaults.
+  - Hardened package entrypoint resolution for external consumer projects.
+- **Repository Metadata**:
+  - Updated repository, homepage, and issue tracker URLs to `https://github.com/9090856788/react-native-release-kit`.
+
+### Refactored
+- Cleaned up internal TypeScript typings and redundant type assertions across Android adapters, build commands, and process wrappers.
+- Hardened logger implementation with prefix trimming, formatted message deduplication, and comprehensive console spy test coverage.
+
 ## [0.4.0] - 2026-10-14
 
 ### Added

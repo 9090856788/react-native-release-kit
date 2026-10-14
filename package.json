@@ -1,6 +1,6 @@
 {
   "name": "react-native-release-kit",
-  "version": "0.4.0",
+  "version": "1.0.0",
   "description": "Production-ready CI/CD configuration, native builds, and store deployment for React Native CLI applications",
   "keywords": [
     "react-native",
@@ -12,13 +12,13 @@
     "android",
     "ios"
   ],
-  "homepage": "https://github.com/react-native-release-kit/react-native-release-kit#readme",
+  "homepage": "https://github.com/9090856788/react-native-release-kit#readme",
   "bugs": {
-    "url": "https://github.com/react-native-release-kit/react-native-release-kit/issues"
+    "url": "https://github.com/9090856788/react-native-release-kit/issues"
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/react-native-release-kit/react-native-release-kit.git"
+    "url": "https://github.com/9090856788/react-native-release-kit.git"
   },
   "license": "MIT",
   "author": "react-native-release-kit contributors",
