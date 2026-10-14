@@ -73,8 +73,7 @@ export async function buildCommand(options: BuildCommandOptions): Promise<number
   const adapter = new AndroidAdapter(config);
   const variant: AndroidVariant = options.variant ?? config.android.buildVariant ?? 'release';
   const artifact: AndroidArtifact =
-    (options.artifact as AndroidArtifact | undefined) ??
-    (variant === 'debug' ? 'apk' : (config.android.buildArtifact ?? 'aab'));
+    options.artifact ?? (variant === 'debug' ? 'apk' : (config.android.buildArtifact ?? 'aab'));
 
   logger.info(
     `Building Android ${pc.bold(variant)} ${pc.cyan(artifact.toUpperCase())} for project: ${pc.bold(config.projectName)}...`,

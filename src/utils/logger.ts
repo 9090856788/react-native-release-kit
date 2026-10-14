@@ -66,10 +66,14 @@ export function maskSecrets(message: string): string {
 
 export class Logger {
   private level: LogLevel = 'info';
+  private prefix?: string;
 
   constructor(options?: LoggerOptions) {
     if (options?.level) {
       this.level = options.level;
+    }
+    if (options?.prefix && options.prefix.trim().length > 0) {
+      this.prefix = options.prefix.trim();
     }
   }
 
@@ -79,6 +83,10 @@ export class Logger {
 
   public getLevel(): LogLevel {
     return this.level;
+  }
+
+  public getPrefix(): string | undefined {
+    return this.prefix;
   }
 
   public isDebug(): boolean {
@@ -93,38 +101,43 @@ export class Logger {
     return msgIdx >= currentIdx;
   }
 
+  private formatMessage(message: string): string {
+    const sanitized = maskSecrets(message);
+    return this.prefix ? `[${this.prefix}] ${sanitized}` : sanitized;
+  }
+
   public debug(message: string, ...args: unknown[]): void {
     if (this.shouldLog('debug')) {
-      const sanitized = maskSecrets(message);
-      console.debug(pc.dim(`[DEBUG] ${sanitized}`), ...args);
+      const formatted = this.formatMessage(message);
+      console.debug(pc.dim(`[DEBUG] ${formatted}`), ...args);
     }
   }
 
   public info(message: string, ...args: unknown[]): void {
     if (this.shouldLog('info')) {
-      const sanitized = maskSecrets(message);
-      console.log(pc.blue('ℹ') + ' ' + sanitized, ...args);
+      const formatted = this.formatMessage(message);
+      console.log(pc.blue('ℹ') + ' ' + formatted, ...args);
     }
   }
 
   public success(message: string, ...args: unknown[]): void {
     if (this.shouldLog('info')) {
-      const sanitized = maskSecrets(message);
-      console.log(pc.green('✔') + ' ' + pc.bold(sanitized), ...args);
+      const formatted = this.formatMessage(message);
+      console.log(pc.green('✔') + ' ' + pc.bold(formatted), ...args);
     }
   }
 
   public warn(message: string, ...args: unknown[]): void {
     if (this.shouldLog('warn')) {
-      const sanitized = maskSecrets(message);
-      console.warn(pc.yellow('⚠') + ' ' + pc.yellow(sanitized), ...args);
+      const formatted = this.formatMessage(message);
+      console.warn(pc.yellow('⚠') + ' ' + pc.yellow(formatted), ...args);
     }
   }
 
   public error(message: string, ...args: unknown[]): void {
     if (this.shouldLog('error')) {
-      const sanitized = maskSecrets(message);
-      console.error(pc.red('✖') + ' ' + pc.red(sanitized), ...args);
+      const formatted = this.formatMessage(message);
+      console.error(pc.red('✖') + ' ' + pc.red(formatted), ...args);
     }
   }
 

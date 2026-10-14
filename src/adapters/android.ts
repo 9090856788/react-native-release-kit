@@ -9,6 +9,10 @@ import type {
   AndroidTrack,
 } from '../config/schema.js';
 import { detectAndroid } from '../detector/android.js';
+import { validateRequiredSecretNames } from '../validators/secrets.js';
+import { safeExec } from '../utils/process.js';
+import { logger, maskSecrets, registerSecretForRedaction } from '../utils/logger.js';
+import { readFileUtf8 } from '../utils/fs.js';
 
 export const SUPPORTED_ANDROID_TRACKS: readonly AndroidTrack[] = [
   'internal',
@@ -17,10 +21,6 @@ export const SUPPORTED_ANDROID_TRACKS: readonly AndroidTrack[] = [
   'beta',
   'production',
 ];
-import { validateRequiredSecretNames } from '../validators/secrets.js';
-import { safeExec } from '../utils/process.js';
-import { logger, maskSecrets, registerSecretForRedaction } from '../utils/logger.js';
-import { readFileUtf8 } from '../utils/fs.js';
 
 export interface AndroidBuildOptions {
   cwd?: string;

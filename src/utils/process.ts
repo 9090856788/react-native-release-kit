@@ -1,4 +1,4 @@
-import { execa, type Options as ExecaOptions, type ResultPromise } from 'execa';
+import { execa, type Options as ExecaOptions } from 'execa';
 import { logger, maskSecrets } from './logger.js';
 
 export interface ExecResult {
@@ -33,18 +33,7 @@ export async function safeExec(
   };
 
   try {
-    const result = (await (execa(
-      file,
-      args,
-      execaOpts,
-    ) as unknown as ResultPromise)) as unknown as {
-      stdout?: string;
-      stderr?: string;
-      exitCode?: number;
-      failed?: boolean;
-      shortMessage?: string;
-      message?: string;
-    };
+    const result = await execa(file, args, execaOpts);
     const isFailed = Boolean(result.failed);
     const resolvedExitCode =
       typeof result.exitCode === 'number' ? result.exitCode : isFailed ? 1 : 0;

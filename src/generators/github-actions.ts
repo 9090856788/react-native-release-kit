@@ -1,6 +1,9 @@
 import path from 'node:path';
 import type { ReleaseKitConfig } from '../config/schema.js';
 import type { ProjectDetectionResult } from '../detector/types.js';
+import { getFrozenInstallCommand } from '../detector/package-manager.js';
+import { validateIOSBundleId } from '../validators/config.js';
+import { formatGradleTaskForWorkflow } from '../adapters/android.js';
 
 export interface WorkflowFile {
   id: 'pr-validation' | 'main-build' | 'release-tag';
@@ -29,10 +32,6 @@ export const GITHUB_ACTIONS_SHAS = {
   setupBun: 'oven-sh/setup-bun@4bc047ad259df6fc24a6c9b0f9a0cb08cf17fbe5 # v2.0.1',
   setupRuby: 'ruby/setup-ruby@359bebbc29cbe6c86eb6bde9f4fb9bf5e2f901a4 # v1.207.0',
 } as const;
-
-import { getFrozenInstallCommand } from '../detector/package-manager.js';
-import { validateIOSBundleId } from '../validators/config.js';
-import { formatGradleTaskForWorkflow } from '../adapters/android.js';
 
 function capitalize(val: string): string {
   if (!val) return '';

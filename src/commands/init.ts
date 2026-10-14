@@ -179,11 +179,11 @@ export async function initCommand(options: InitCommandOptions = {}): Promise<num
       default: detected.android.hasAndroid,
     });
 
-    let androidConfig = {
+    let androidConfig: ReleaseKitUserConfig['android'] = {
       enabled: false,
-      buildArtifact: 'aab' as AndroidArtifact,
+      buildArtifact: 'aab',
       buildTask: 'bundleRelease',
-      deploymentTrack: 'internal' as AndroidTrack,
+      deploymentTrack: 'internal',
       applicationId: detected.android.applicationId,
       packagePath: 'android',
     };
@@ -234,10 +234,10 @@ export async function initCommand(options: InitCommandOptions = {}): Promise<num
 
     let iosConfig: ReleaseKitUserConfig['ios'] = {
       enabled: false,
-      buildArtifact: 'ipa' as const,
+      buildArtifact: 'ipa',
       scheme: detected.ios.schemes[0] || projectName,
       ...(reliableDetectedBundleId ? { bundleId: reliableDetectedBundleId } : {}),
-      exportMethod: 'app-store' as IOSExportMethod,
+      exportMethod: 'app-store',
       packagePath: 'ios',
     };
 
