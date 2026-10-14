@@ -248,6 +248,92 @@ describe('GitHub Actions Workflow Generators', () => {
       const yaml = generateMainBuildWorkflow(config, project);
       expect(yaml).not.toContain('build-android:');
     });
+    it('includes iOS simulator validation build job when ios is enabled and detected', () => {
+      const config = createMockConfig({
+        ios: {
+          ...getBaseConfig().ios,
+          enabled: true,
+        },
+      });
+      const project = createMockProject({
+        ios: {
+          hasIOS: true,
+          hasPodfile: true,
+          workspace: 'ios/TestApp.xcworkspace',
+          schemes: ['TestApp'],
+        },
+      });
+
+      const yaml = generateMainBuildWorkflow(config, project);
+      const validation = validateWorkflowYaml(yaml);
+
+      expect(validation.valid).toBe(true);
+      expect(yaml).toContain('build-ios:');
+      expect(yaml).toContain('name: Build iOS (Simulator Validation)');
+      expect(yaml).toContain('runs-on: macos-14');
+      expect(yaml).toContain('needs: verify');
+      expect(yaml).toContain('Install CocoaPods dependencies');
+      expect(yaml).toContain('cd "ios"\n          pod install');
+      expect(yaml).toContain(
+        'xcodebuild \\\n            -workspace "ios/TestApp.xcworkspace" \\\n            -scheme "TestApp" \\\n            -configuration Debug \\\n            -sdk iphonesimulator \\\n            -destination \'generic/platform=iOS Simulator\' \\\n            -derivedDataPath "ios/build" \\\n            CODE_SIGNING_ALLOWED=NO \\\n            build',
+      );
+      expect(yaml).toContain(
+        'uses: actions/upload-artifact@4cec3d8aa04e39d1a68397de0c4cd6fb9dce8ec1 # v4.6.1',
+      );
+      expect(yaml).toContain('name: ios-${{ github.sha }}-simulator');
+      expect(yaml).toContain('path: ios/build/Build/Products/Debug-iphonesimulator/*.app');
+      expect(yaml).toContain('if-no-files-found: error');
+      expect(yaml).toContain('retention-days: 14');
+    });
+
+    it('omits iOS simulator build job when ios.enabled is false', () => {
+      const config = createMockConfig({
+        ios: {
+          ...getBaseConfig().ios,
+          enabled: false,
+        },
+      });
+      const project = createMockProject();
+
+      const yaml = generateMainBuildWorkflow(config, project);
+      expect(yaml).not.toContain('build-ios:');
+      expect(yaml).not.toContain('iphonesimulator');
+    });
+
+    it('omits iOS simulator build job when ios folder does not exist', () => {
+      const config = createMockConfig({
+        ios: {
+          ...getBaseConfig().ios,
+          enabled: true,
+        },
+      });
+      const project = createMockProject({
+        ios: {
+          hasIOS: false,
+          hasPodfile: false,
+          schemes: [],
+        },
+      });
+
+      const yaml = generateMainBuildWorkflow(config, project);
+      expect(yaml).not.toContain('build-ios:');
+    });
+
+    it('omits CocoaPods step in iOS job when project has no Podfile', () => {
+      const config = createMockConfig();
+      const project = createMockProject({
+        ios: {
+          hasIOS: true,
+          hasPodfile: false,
+          workspace: 'ios/TestApp.xcworkspace',
+          schemes: ['TestApp'],
+        },
+      });
+
+      const yaml = generateMainBuildWorkflow(config, project);
+      expect(yaml).toContain('build-ios:');
+      expect(yaml).not.toContain('Install CocoaPods dependencies');
+    });
   });
 
   describe('Release Tag Deployment Workflow', () => {
@@ -313,10 +399,59 @@ describe('GitHub Actions Workflow Generators', () => {
       expect(yaml).toContain('KEY_PASSWORD: ${{ secrets.CUSTOM_ALIAS_PWD }}');
     });
 
-    it('generates release-notice job when android is disabled', () => {
+    it('includes production safeguard check in release-tag workflow when deploymentTrack is production and allowProductionPublish is false', () => {
       const config = createMockConfig({
         android: {
           ...getBaseConfig().android,
+          deploymentTrack: 'production',
+          allowProductionPublish: false,
+        },
+        githubActions: {
+          ...getBaseConfig().githubActions,
+          storePublishing: true,
+        },
+      });
+      const project = createMockProject();
+
+      const yaml = generateReleaseTagWorkflow(config, project);
+      const validation = validateWorkflowYaml(yaml);
+
+      expect(validation.valid).toBe(true);
+      expect(yaml).toContain('Publish to Google Play (production)');
+      expect(yaml).toContain('Production track publishing is blocked by default');
+      expect(yaml).toContain('android.allowProductionPublish: true');
+    });
+
+    it('allows production publishing in release-tag workflow when allowProductionPublish is true', () => {
+      const config = createMockConfig({
+        android: {
+          ...getBaseConfig().android,
+          deploymentTrack: 'production',
+          allowProductionPublish: true,
+        },
+        githubActions: {
+          ...getBaseConfig().githubActions,
+          storePublishing: true,
+        },
+      });
+      const project = createMockProject();
+
+      const yaml = generateReleaseTagWorkflow(config, project);
+      const validation = validateWorkflowYaml(yaml);
+
+      expect(validation.valid).toBe(true);
+      expect(yaml).toContain('Publish to Google Play (production)');
+      expect(yaml).toContain('if [ "true" != "true" ]');
+    });
+
+    it('generates release-notice job when both android and ios are disabled', () => {
+      const config = createMockConfig({
+        android: {
+          ...getBaseConfig().android,
+          enabled: false,
+        },
+        ios: {
+          ...getBaseConfig().ios,
           enabled: false,
         },
       });
@@ -328,6 +463,285 @@ describe('GitHub Actions Workflow Generators', () => {
       expect(validation.valid).toBe(true);
       expect(yaml).toContain('release-notice:');
       expect(yaml).not.toContain('release-android:');
+      expect(yaml).not.toContain('release-ios:');
+    });
+
+    it('includes iOS release archive & export job when ios is enabled and detected', () => {
+      const config = createMockConfig({
+        android: {
+          ...getBaseConfig().android,
+          enabled: false,
+        },
+        ios: {
+          ...getBaseConfig().ios,
+          enabled: true,
+          exportMethod: 'app-store',
+          buildArtifact: 'ipa',
+        },
+      });
+      const project = createMockProject({
+        ios: {
+          hasIOS: true,
+          hasPodfile: true,
+          workspace: 'ios/TestApp.xcworkspace',
+          schemes: ['TestApp'],
+        },
+      });
+
+      const yaml = generateReleaseTagWorkflow(config, project);
+      const validation = validateWorkflowYaml(yaml);
+
+      expect(validation.valid).toBe(true);
+      expect(yaml).toContain('release-ios:');
+      expect(yaml).toContain('name: Build & Archive iOS Release');
+      expect(yaml).toContain('runs-on: macos-14');
+      expect(yaml).toContain('Prepare Export Options Plist');
+      expect(yaml).toContain('<string>app-store</string>');
+      expect(yaml).toContain('Build & Archive iOS App');
+      expect(yaml).toContain(
+        'xcodebuild \\\n            -workspace "ios/TestApp.xcworkspace" \\\n            -scheme "TestApp" \\\n            -configuration Release \\\n            -destination \'generic/platform=iOS\' \\\n            -archivePath "$RUNNER_TEMP/build/TestApp.xcarchive" \\\n            archive',
+      );
+      expect(yaml).toContain('Export Release Artifact');
+      expect(yaml).toContain(
+        'xcodebuild \\\n            -exportArchive \\\n            -archivePath "$RUNNER_TEMP/build/TestApp.xcarchive" \\\n            -exportOptionsPlist "$RUNNER_TEMP/ExportOptions.plist" \\\n            -exportPath "ios/build/output"',
+      );
+      expect(yaml).toContain('Upload iOS Release Artifact');
+      expect(yaml).toContain('name: ios-release-${{ github.ref_name }}-ipa');
+      expect(yaml).toContain('path: ios/build/output/*.ipa');
+      expect(yaml).toContain('if-no-files-found: error');
+      expect(yaml).toContain('TestFlight publishing is disabled by default');
+    });
+
+    it('supports TestFlight upload when storePublishing=true with App Store Connect credentials', () => {
+      const config = createMockConfig({
+        android: {
+          ...getBaseConfig().android,
+          enabled: false,
+        },
+        ios: {
+          ...getBaseConfig().ios,
+          enabled: true,
+        },
+        githubActions: {
+          ...getBaseConfig().githubActions,
+          storePublishing: true,
+        },
+        signing: {
+          ...getBaseConfig().signing,
+          ios: {
+            appStoreConnectKeyContentSecretName: 'CUSTOM_ASC_KEY_CONTENT',
+            appStoreConnectApiKeySecretName: 'CUSTOM_ASC_KEY_CONTENT',
+            appStoreConnectKeyIdSecretName: 'CUSTOM_ASC_KEY_ID',
+            appStoreConnectIssuerIdSecretName: 'CUSTOM_ASC_ISSUER_ID',
+          },
+        },
+      });
+      const project = createMockProject({
+        ios: {
+          hasIOS: true,
+          hasPodfile: true,
+          workspace: 'ios/TestApp.xcworkspace',
+          schemes: ['TestApp'],
+        },
+      });
+
+      const yaml = generateReleaseTagWorkflow(config, project);
+      const validation = validateWorkflowYaml(yaml);
+
+      expect(validation.valid).toBe(true);
+      expect(yaml).toContain('Validate App Store Connect Credentials');
+      expect(yaml).toContain('ASC_KEY_CONTENT: ${{ secrets.CUSTOM_ASC_KEY_CONTENT }}');
+      expect(yaml).toContain('ASC_KEY_ID: ${{ secrets.CUSTOM_ASC_KEY_ID }}');
+      expect(yaml).toContain('ASC_ISSUER_ID: ${{ secrets.CUSTOM_ASC_ISSUER_ID }}');
+      expect(yaml).toContain('Setup Ruby for Fastlane');
+      expect(yaml).toContain('Publish to Apple TestFlight');
+      expect(yaml).toContain('pilot upload --ipa "$ARTIFACT_FILE"');
+      expect(yaml).toContain('Cleanup App Store Connect Credentials');
+      expect(yaml).toContain('rm -f "$RUNNER_TEMP/asc_key.json"');
+    });
+
+    it('supports iOS-only project (android disabled, ios enabled)', () => {
+      const config = createMockConfig({
+        android: {
+          ...getBaseConfig().android,
+          enabled: false,
+        },
+        ios: {
+          ...getBaseConfig().ios,
+          enabled: true,
+        },
+      });
+      const project = createMockProject({
+        android: {
+          hasAndroid: false,
+          hasGradlew: false,
+          buildGradleFound: false,
+        },
+        ios: {
+          hasIOS: true,
+          hasPodfile: true,
+          workspace: 'ios/TestApp.xcworkspace',
+          schemes: ['TestApp'],
+        },
+      });
+
+      const mainYaml = generateMainBuildWorkflow(config, project);
+      expect(mainYaml).toContain('build-ios:');
+      expect(mainYaml).not.toContain('build-android:');
+      expect(validateWorkflowYaml(mainYaml).valid).toBe(true);
+
+      const releaseYaml = generateReleaseTagWorkflow(config, project);
+      expect(releaseYaml).toContain('release-ios:');
+      expect(releaseYaml).not.toContain('release-android:');
+      expect(releaseYaml).not.toContain('release-notice:');
+      expect(validateWorkflowYaml(releaseYaml).valid).toBe(true);
+    });
+
+    it('supports Android-only project (android enabled, ios disabled)', () => {
+      const config = createMockConfig({
+        android: {
+          ...getBaseConfig().android,
+          enabled: true,
+        },
+        ios: {
+          ...getBaseConfig().ios,
+          enabled: false,
+        },
+      });
+      const project = createMockProject({
+        android: {
+          hasAndroid: true,
+          hasGradlew: true,
+          buildGradleFound: true,
+        },
+        ios: {
+          hasIOS: false,
+          hasPodfile: false,
+          schemes: [],
+        },
+      });
+
+      const mainYaml = generateMainBuildWorkflow(config, project);
+      expect(mainYaml).toContain('build-android:');
+      expect(mainYaml).not.toContain('build-ios:');
+      expect(validateWorkflowYaml(mainYaml).valid).toBe(true);
+
+      const releaseYaml = generateReleaseTagWorkflow(config, project);
+      expect(releaseYaml).toContain('release-android:');
+      expect(releaseYaml).not.toContain('release-ios:');
+      expect(releaseYaml).not.toContain('release-notice:');
+      expect(validateWorkflowYaml(releaseYaml).valid).toBe(true);
+    });
+
+    it('generates Android release signing env block with standard properties when signing is enabled', () => {
+      const config = createMockConfig({
+        android: {
+          ...getBaseConfig().android,
+          enabled: true,
+        },
+        signing: {
+          ...getBaseConfig().signing,
+          android: {
+            ...getBaseConfig().signing.android,
+            enabled: true,
+          },
+        },
+      });
+      const project = createMockProject({
+        android: {
+          hasAndroid: true,
+          hasGradlew: true,
+          buildGradleFound: true,
+        },
+      });
+
+      const releaseYaml = generateReleaseTagWorkflow(config, project);
+      expect(releaseYaml).toContain(
+        'ORG_GRADLE_PROJECT_MYAPP_UPLOAD_STORE_FILE: ${{ runner.temp }}/release.keystore',
+      );
+      expect(releaseYaml).toContain(
+        'ORG_GRADLE_PROJECT_ANDROID_KEYSTORE_PATH: ${{ runner.temp }}/release.keystore',
+      );
+      expect(releaseYaml).toContain('ANDROID_KEYSTORE_PATH: ${{ runner.temp }}/release.keystore');
+      expect(releaseYaml).toContain('Cleanup Signing Keystore');
+      expect(validateWorkflowYaml(releaseYaml).valid).toBe(true);
+    });
+
+    it('generates Android release signing env block with custom secret and env var names', () => {
+      const config = createMockConfig({
+        android: {
+          ...getBaseConfig().android,
+          enabled: true,
+        },
+        signing: {
+          ...getBaseConfig().signing,
+          android: {
+            ...getBaseConfig().signing.android,
+            enabled: true,
+            keystoreSecretName: 'CUSTOM_KEYSTORE_B64',
+            keystorePasswordSecretName: 'CUSTOM_KEYSTORE_PWD',
+            keyAliasSecretName: 'CUSTOM_KEY_ALIAS_NAME',
+            keyPasswordSecretName: 'CUSTOM_KEY_PWD',
+            keystorePathEnvName: 'CUSTOM_KEYSTORE_FILE_PATH',
+          },
+        },
+      });
+      const project = createMockProject({
+        android: {
+          hasAndroid: true,
+          hasGradlew: true,
+          buildGradleFound: true,
+        },
+      });
+
+      const releaseYaml = generateReleaseTagWorkflow(config, project);
+      expect(releaseYaml).toContain(
+        'CUSTOM_KEYSTORE_FILE_PATH: ${{ runner.temp }}/release.keystore',
+      );
+      expect(releaseYaml).toContain('CUSTOM_KEYSTORE_PWD: ${{ secrets.CUSTOM_KEYSTORE_PWD }}');
+      expect(releaseYaml).toContain('CUSTOM_KEY_ALIAS_NAME: ${{ secrets.CUSTOM_KEY_ALIAS_NAME }}');
+      expect(releaseYaml).toContain('CUSTOM_KEY_PWD: ${{ secrets.CUSTOM_KEY_PWD }}');
+      expect(releaseYaml).toContain(
+        'ORG_GRADLE_PROJECT_MYAPP_UPLOAD_STORE_FILE: ${{ runner.temp }}/release.keystore',
+      );
+      expect(validateWorkflowYaml(releaseYaml).valid).toBe(true);
+    });
+
+    it('supports combined Android and iOS project (both enabled and detected)', () => {
+      const config = createMockConfig({
+        android: {
+          ...getBaseConfig().android,
+          enabled: true,
+        },
+        ios: {
+          ...getBaseConfig().ios,
+          enabled: true,
+        },
+      });
+      const project = createMockProject({
+        android: {
+          hasAndroid: true,
+          hasGradlew: true,
+          buildGradleFound: true,
+        },
+        ios: {
+          hasIOS: true,
+          hasPodfile: true,
+          workspace: 'ios/TestApp.xcworkspace',
+          schemes: ['TestApp'],
+        },
+      });
+
+      const mainYaml = generateMainBuildWorkflow(config, project);
+      expect(mainYaml).toContain('build-android:');
+      expect(mainYaml).toContain('build-ios:');
+      expect(validateWorkflowYaml(mainYaml).valid).toBe(true);
+
+      const releaseYaml = generateReleaseTagWorkflow(config, project);
+      expect(releaseYaml).toContain('release-android:');
+      expect(releaseYaml).toContain('release-ios:');
+      expect(releaseYaml).not.toContain('release-notice:');
+      expect(validateWorkflowYaml(releaseYaml).valid).toBe(true);
     });
   });
 
@@ -527,6 +941,448 @@ describe('GitHub Actions Workflow Generators', () => {
       for (let i = 0; i < run1.workflows.length; i++) {
         expect(run1.workflows[i]?.content).toBe(run2.workflows[i]?.content);
       }
+    });
+
+    describe('Phase A — Script Detection & Trigger Alignment', () => {
+      it('omits typecheck step when project has no typecheck script and config has no custom command', async () => {
+        const config = createMockConfig({
+          scripts: {
+            lint: 'npm run lint',
+            test: 'npm test',
+          },
+        });
+        const project = createMockProject({
+          scripts: {
+            lint: 'eslint .',
+            test: 'jest',
+          },
+        });
+
+        const prYaml = generatePrValidationWorkflow(config, project);
+        expect(prYaml).toContain('name: Run Lint');
+        expect(prYaml).toContain('name: Run Tests');
+        expect(prYaml).not.toContain('Typecheck');
+
+        const mainYaml = generateMainBuildWorkflow(config, project);
+        expect(mainYaml).not.toContain('Typecheck');
+      });
+
+      it('safely skips legacy config with typecheck="npm run typecheck" when package.json lacks typecheck script', async () => {
+        const config = createMockConfig({
+          scripts: {
+            lint: 'npm run lint',
+            typecheck: 'npm run typecheck',
+            test: 'npm test',
+          },
+        });
+        const project = createMockProject({
+          scripts: {
+            lint: 'eslint .',
+            test: 'jest',
+          },
+        });
+
+        const result = await generateGitHubWorkflows(config, project);
+        const prWf = result.workflows.find((w) => w.id === 'pr-validation');
+        expect(prWf).toBeDefined();
+        expect(prWf?.content).not.toContain('npm run typecheck');
+        expect(
+          result.warnings.some(
+            (w) =>
+              w.includes('Skipped typecheck step') && w.includes('does not exist in package.json'),
+          ),
+        ).toBe(true);
+      });
+
+      it('generates custom standalone typecheck command (e.g. npx tsc --noEmit) even if package.json has no typecheck script', async () => {
+        const config = createMockConfig({
+          scripts: {
+            typecheck: 'npx tsc --noEmit',
+          },
+        });
+        const project = createMockProject({
+          scripts: {
+            lint: 'eslint .',
+            test: 'jest',
+          },
+        });
+
+        const prYaml = generatePrValidationWorkflow(config, project);
+        expect(prYaml).toContain('name: Run Typecheck');
+        expect(prYaml).toContain('run: npx tsc --noEmit');
+      });
+
+      it('generates custom referenced package script (e.g. npm run check:types) when it exists in package.json', async () => {
+        const config = createMockConfig({
+          scripts: {
+            typecheck: 'npm run check:types',
+          },
+        });
+        const project = createMockProject({
+          scripts: {
+            lint: 'eslint .',
+            'check:types': 'tsc --noEmit',
+            test: 'jest',
+          },
+        });
+
+        const prYaml = generatePrValidationWorkflow(config, project);
+        expect(prYaml).toContain('name: Run Typecheck');
+        expect(prYaml).toContain('run: npm run check:types');
+      });
+
+      it('generates no workflows and returns warning when githubActions.enabled is false', async () => {
+        const config = createMockConfig({
+          githubActions: {
+            ...getBaseConfig().githubActions,
+            enabled: false,
+          },
+        });
+        const project = createMockProject();
+
+        const result = await generateGitHubWorkflows(config, project);
+        expect(result.workflows).toHaveLength(0);
+        expect(
+          result.warnings.some((w) =>
+            w.includes('GitHub Actions workflow generation is disabled in configuration'),
+          ),
+        ).toBe(true);
+      });
+
+      it('respects triggers.pullRequest=false by skipping PR workflow and logging conflict warning', async () => {
+        const config = createMockConfig({
+          githubActions: {
+            ...getBaseConfig().githubActions,
+            triggers: {
+              pullRequest: false,
+              main: true,
+              releaseTags: true,
+            },
+          },
+        });
+        const project = createMockProject();
+
+        const result = await generateGitHubWorkflows(config, project);
+        const ids = result.workflows.map((w) => w.id);
+        expect(ids).not.toContain('pr-validation');
+        expect(ids).toContain('main-build');
+        expect(ids).toContain('release-tag');
+        expect(
+          result.warnings.some((w) =>
+            w.includes(
+              'Skipping pr-validation.yml because githubActions.triggers.pullRequest is false',
+            ),
+          ),
+        ).toBe(true);
+      });
+
+      it('respects triggers.main=false by skipping main-build.yml', async () => {
+        const config = createMockConfig({
+          githubActions: {
+            ...getBaseConfig().githubActions,
+            triggers: {
+              pullRequest: true,
+              main: false,
+              releaseTags: true,
+            },
+          },
+        });
+        const project = createMockProject();
+
+        const result = await generateGitHubWorkflows(config, project);
+        const ids = result.workflows.map((w) => w.id);
+        expect(ids).toContain('pr-validation');
+        expect(ids).not.toContain('main-build');
+        expect(ids).toContain('release-tag');
+        expect(
+          result.warnings.some((w) =>
+            w.includes('Skipping main-build.yml because githubActions.triggers.main is false'),
+          ),
+        ).toBe(true);
+      });
+
+      it('respects triggers.releaseTags=false by skipping release-tag.yml', async () => {
+        const config = createMockConfig({
+          githubActions: {
+            ...getBaseConfig().githubActions,
+            triggers: {
+              pullRequest: true,
+              main: true,
+              releaseTags: false,
+            },
+          },
+        });
+        const project = createMockProject();
+
+        const result = await generateGitHubWorkflows(config, project);
+        const ids = result.workflows.map((w) => w.id);
+        expect(ids).toContain('pr-validation');
+        expect(ids).toContain('main-build');
+        expect(ids).not.toContain('release-tag');
+        expect(
+          result.warnings.some((w) =>
+            w.includes(
+              'Skipping release-tag.yml because githubActions.triggers.releaseTags is false',
+            ),
+          ),
+        ).toBe(true);
+      });
+
+      it('warns when iOS bundleId contains an unresolved Xcode build setting macro', async () => {
+        const config = createMockConfig({
+          ios: {
+            ...getBaseConfig().ios,
+            enabled: true,
+            bundleId: 'org.reactjs.native.example.$(PRODUCT_NAME:rfc1034identifier)',
+          },
+        });
+        const project = createMockProject();
+
+        const result = await generateGitHubWorkflows(config, project);
+        expect(
+          result.warnings.some(
+            (w) =>
+              w.includes('contains an unresolved Xcode build setting macro') ||
+              w.includes('Replace the Xcode macro'),
+          ),
+        ).toBe(true);
+      });
+    });
+
+    describe('Phase B — iOS Build & Deployment Workflows Verification', () => {
+      it('falls back to -project when no xcworkspace exists', () => {
+        const config = createMockConfig({
+          ios: {
+            ...getBaseConfig().ios,
+            enabled: true,
+            workspace: undefined,
+          },
+        });
+        const project = createMockProject({
+          ios: {
+            hasIOS: true,
+            hasPodfile: false,
+            workspace: undefined,
+            xcodeproj: 'ios/BareApp.xcodeproj',
+            schemes: ['BareApp'],
+          },
+        });
+
+        const mainYaml = generateMainBuildWorkflow(config, project);
+        expect(mainYaml).toContain('-project "ios/BareApp.xcodeproj"');
+        expect(mainYaml).not.toContain('-workspace');
+
+        const releaseYaml = generateReleaseTagWorkflow(config, project);
+        expect(releaseYaml).toContain('-project "ios/BareApp.xcodeproj"');
+        expect(releaseYaml).not.toContain('-workspace');
+      });
+
+      it('filters out test schemes (Tests, UITests) and selects the app target scheme', () => {
+        const config = createMockConfig({
+          projectName: 'MyRealApp',
+          ios: {
+            ...getBaseConfig().ios,
+            enabled: true,
+            scheme: undefined,
+          },
+        });
+        const project = createMockProject({
+          ios: {
+            hasIOS: true,
+            hasPodfile: true,
+            workspace: 'ios/MyRealApp.xcworkspace',
+            schemes: ['MyRealAppTests', 'MyRealAppUITests', 'MyRealApp'],
+          },
+        });
+
+        const mainYaml = generateMainBuildWorkflow(config, project);
+        expect(mainYaml).toContain('-scheme "MyRealApp"');
+        expect(mainYaml).not.toContain('-scheme "MyRealAppTests"');
+        expect(mainYaml).not.toContain('-scheme "MyRealAppUITests"');
+
+        const releaseYaml = generateReleaseTagWorkflow(config, project);
+        expect(releaseYaml).toContain('-scheme "MyRealApp"');
+      });
+
+      it('handles custom packagePath and directories with spaces safely', () => {
+        const config = createMockConfig({
+          projectName: 'Space App',
+          ios: {
+            ...getBaseConfig().ios,
+            enabled: true,
+            packagePath: 'packages/my app/ios',
+            workspace: 'packages/my app/ios/Space App.xcworkspace',
+            scheme: 'Space App',
+          },
+        });
+        const project = createMockProject({
+          ios: {
+            hasIOS: true,
+            hasPodfile: true,
+            packagePath: 'packages/my app/ios',
+            workspace: 'packages/my app/ios/Space App.xcworkspace',
+            schemes: ['Space App'],
+          },
+        });
+
+        const mainYaml = generateMainBuildWorkflow(config, project);
+        expect(mainYaml).toContain('cd "packages/my app/ios"');
+        expect(mainYaml).toContain('-workspace "packages/my app/ios/Space App.xcworkspace"');
+        expect(mainYaml).toContain('-scheme "Space App"');
+        expect(mainYaml).toContain('-derivedDataPath "packages/my app/ios/build"');
+        expect(mainYaml).toContain(
+          'path: packages/my app/ios/build/Build/Products/Debug-iphonesimulator/*.app',
+        );
+
+        const releaseYaml = generateReleaseTagWorkflow(config, project);
+        expect(releaseYaml).toContain('cd "packages/my app/ios"');
+        expect(releaseYaml).toContain('-workspace "packages/my app/ios/Space App.xcworkspace"');
+        expect(releaseYaml).toContain('-scheme "Space App"');
+        expect(releaseYaml).toContain('mkdir -p "packages/my app/ios/build/output"');
+        expect(releaseYaml).toContain('-exportPath "packages/my app/ios/build/output"');
+        expect(releaseYaml).toContain('path: packages/my app/ios/build/output/*.ipa');
+      });
+
+      it('generates signing prerequisite validation and provisioning steps with cleanup on always()', () => {
+        const config = createMockConfig({
+          ios: {
+            ...getBaseConfig().ios,
+            enabled: true,
+            teamId: 'TEAM123456',
+          },
+          signing: {
+            ...getBaseConfig().signing,
+            ios: {
+              ...getBaseConfig().signing.ios,
+              certificateSecretName: 'CUSTOM_IOS_CERT',
+              certificatePasswordSecretName: 'CUSTOM_IOS_PWD',
+              provisioningProfileSecretName: 'CUSTOM_IOS_PROFILE',
+            },
+          },
+        });
+        const project = createMockProject({
+          ios: {
+            hasIOS: true,
+            hasPodfile: true,
+            workspace: 'ios/TestApp.xcworkspace',
+            schemes: ['TestApp'],
+          },
+        });
+
+        const releaseYaml = generateReleaseTagWorkflow(config, project);
+        expect(releaseYaml).toContain('Validate iOS Release Signing Prerequisites');
+        expect(releaseYaml).toContain('CERT_B64: ${{ secrets.CUSTOM_IOS_CERT }}');
+        expect(releaseYaml).toContain('CERT_PWD: ${{ secrets.CUSTOM_IOS_PWD }}');
+        expect(releaseYaml).toContain('PROFILE_B64: ${{ secrets.CUSTOM_IOS_PROFILE }}');
+        expect(releaseYaml).toContain('Provision iOS Distribution Certificate & Profile');
+        expect(releaseYaml).toContain(
+          'security create-keychain -p "$KEYCHAIN_PWD" "$KEYCHAIN_PATH"',
+        );
+        expect(releaseYaml).toContain('security import "$RUNNER_TEMP/cert.p12"');
+        expect(releaseYaml).toContain(
+          '~/Library/MobileDevice/Provisioning\\ Profiles/embedded.mobileprovision',
+        );
+        expect(releaseYaml).toContain('Prepare Export Options Plist');
+        expect(releaseYaml).toContain('EFFECTIVE_TEAM_ID="TEAM123456"');
+        expect(releaseYaml).toContain('<key>teamID</key>');
+        expect(releaseYaml).toContain('Cleanup iOS Signing Keychain');
+        expect(releaseYaml).toContain('security delete-keychain "$RUNNER_TEMP/build.keychain"');
+      });
+
+      it('handles Fastlane Gemfile detection and Pilot upload correctly in release workflow', () => {
+        const config = createMockConfig({
+          ios: {
+            ...getBaseConfig().ios,
+            enabled: true,
+            uploadToTestFlight: true,
+          },
+        });
+        const project = createMockProject({
+          ios: {
+            hasIOS: true,
+            hasPodfile: true,
+            workspace: 'ios/TestApp.xcworkspace',
+            schemes: ['TestApp'],
+          },
+        });
+
+        const releaseYaml = generateReleaseTagWorkflow(config, project);
+        expect(releaseYaml).toContain('Setup Ruby for Fastlane');
+        expect(releaseYaml).toContain('Install Fastlane');
+        expect(releaseYaml).toContain('if [ -f "Gemfile" ]; then');
+        expect(releaseYaml).toContain('elif [ -f "ios/Gemfile" ]; then');
+        expect(releaseYaml).toContain('gem install fastlane --no-document');
+        expect(releaseYaml).toContain('chmod 600 "$RUNNER_TEMP/asc_key.json"');
+        expect(releaseYaml).toContain('pilot upload --ipa "$ARTIFACT_FILE"');
+        expect(releaseYaml).toContain('Cleanup App Store Connect Credentials');
+        expect(releaseYaml).toContain('rm -f "$RUNNER_TEMP/asc_key.json"');
+      });
+
+      it('strictly ensures TestFlight upload is NEVER included in PR validation or main build workflows', () => {
+        const config = createMockConfig({
+          ios: {
+            ...getBaseConfig().ios,
+            enabled: true,
+            uploadToTestFlight: true,
+          },
+          githubActions: {
+            ...getBaseConfig().githubActions,
+            storePublishing: true,
+          },
+        });
+        const project = createMockProject({
+          ios: {
+            hasIOS: true,
+            hasPodfile: true,
+            workspace: 'ios/TestApp.xcworkspace',
+            schemes: ['TestApp'],
+          },
+        });
+
+        const prYaml = generatePrValidationWorkflow(config, project);
+        expect(prYaml).not.toContain('TestFlight');
+        expect(prYaml).not.toContain('pilot upload');
+        expect(prYaml).not.toContain('asc_key.json');
+
+        const mainYaml = generateMainBuildWorkflow(config, project);
+        expect(mainYaml).not.toContain('TestFlight');
+        expect(mainYaml).not.toContain('pilot upload');
+        expect(mainYaml).not.toContain('asc_key.json');
+      });
+
+      it('isolates simulator build to main-build.yml and release archive to release-tag.yml', () => {
+        const config = createMockConfig({
+          ios: {
+            ...getBaseConfig().ios,
+            enabled: true,
+          },
+        });
+        const project = createMockProject({
+          ios: {
+            hasIOS: true,
+            hasPodfile: true,
+            workspace: 'ios/TestApp.xcworkspace',
+            schemes: ['TestApp'],
+          },
+        });
+
+        const prYaml = generatePrValidationWorkflow(config, project);
+        expect(prYaml).not.toContain('build-ios:');
+        expect(prYaml).not.toContain('iphonesimulator');
+
+        const mainYaml = generateMainBuildWorkflow(config, project);
+        expect(mainYaml).toContain('build-ios:');
+        expect(mainYaml).toContain('iphonesimulator');
+        expect(mainYaml).toContain('CODE_SIGNING_ALLOWED=NO');
+        expect(mainYaml).not.toContain('generic/platform=iOS\n');
+        expect(mainYaml).not.toContain('archive');
+
+        const releaseYaml = generateReleaseTagWorkflow(config, project);
+        expect(releaseYaml).toContain('release-ios:');
+        expect(releaseYaml).not.toContain('iphonesimulator');
+        expect(releaseYaml).toContain('archive');
+        expect(releaseYaml).toContain('exportArchive');
+      });
     });
   });
 });

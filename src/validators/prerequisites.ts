@@ -3,6 +3,7 @@ import { existsSync } from 'node:fs';
 import { safeExec } from '../utils/process.js';
 import { detectProject } from '../detector/project.js';
 import { loadConfig } from '../config/loader.js';
+import { validateIOSBundleId } from './config.js';
 import type { DoctorCheckItem, DoctorReport } from './types.js';
 
 export interface DoctorOptions {
@@ -38,8 +39,16 @@ export async function runDoctorChecks(options: DoctorOptions = {}): Promise<Doct
     });
   }
 
-  // 2. React Native project structure
-  const project = await detectProject(cwd);
+  // 2. Load Configuration first so custom packagePath settings are respected during detection
+  const configResult = await loadConfig(cwd);
+
+  // 3. React Native project structure (using configured packagePath if available)
+  const project = await detectProject(cwd, {
+    androidPackagePath: configResult.config?.android.packagePath,
+    androidAppModule: configResult.config?.android.appModule,
+    iosPackagePath: configResult.config?.ios.packagePath,
+  });
+
   if (project.isReactNative) {
     checks.push({
       id: 'rn-project',
@@ -59,7 +68,7 @@ export async function runDoctorChecks(options: DoctorOptions = {}): Promise<Doct
     });
   }
 
-  // 3. Package Manager
+  // 4. Package Manager
   checks.push({
     id: 'package-manager',
     category: 'environment',
@@ -70,8 +79,7 @@ export async function runDoctorChecks(options: DoctorOptions = {}): Promise<Doct
     }.`,
   });
 
-  // 4. Configuration Check
-  const configResult = await loadConfig(cwd);
+  // 5. Configuration Check
   if (configResult.config) {
     checks.push({
       id: 'config-file',
@@ -110,6 +118,42 @@ export async function runDoctorChecks(options: DoctorOptions = {}): Promise<Doct
         message: warningMsg,
         remediation:
           'Keep only one primary configuration file (prefer react-native-release.config.ts) and delete obsolete configs.',
+      });
+    }
+  }
+
+  // Check iOS bundleId if iOS is enabled and a bundleId is configured or detected
+  const iosEnabled = configResult.config ? configResult.config.ios.enabled : project.ios.hasIOS;
+  const effectiveBundleId = configResult.config?.ios.bundleId ?? project.ios.bundleId;
+  if (iosEnabled && effectiveBundleId) {
+    const bundleCheck = validateIOSBundleId(effectiveBundleId, { requireProduction: false });
+    if (!bundleCheck.validForDebug) {
+      checks.push({
+        id: 'ios-bundle-id',
+        category: 'config',
+        title: 'iOS Bundle Identifier',
+        status: 'fail',
+        message: bundleCheck.errors[0] || `Invalid iOS bundleId: ${effectiveBundleId}`,
+        remediation: bundleCheck.remediation,
+      });
+    } else if (!bundleCheck.validForProduction) {
+      checks.push({
+        id: 'ios-bundle-id',
+        category: 'config',
+        title: 'iOS Bundle Identifier',
+        status: 'warn',
+        message:
+          bundleCheck.warnings[0] ||
+          `iOS bundleId "${effectiveBundleId}" is a placeholder or unresolved Xcode macro.`,
+        remediation: bundleCheck.remediation,
+      });
+    } else {
+      checks.push({
+        id: 'ios-bundle-id',
+        category: 'config',
+        title: 'iOS Bundle Identifier',
+        status: 'pass',
+        message: `Configured production iOS Bundle Identifier: ${effectiveBundleId}`,
       });
     }
   }
@@ -180,6 +224,40 @@ export async function runDoctorChecks(options: DoctorOptions = {}): Promise<Doct
           status: 'warn',
           message: 'android/gradlew script is missing.',
           remediation: 'Generate or restore the Gradle wrapper in your android/ directory.',
+        });
+      }
+
+      if (project.android.usesDebugSigningInRelease) {
+        checks.push({
+          id: 'android-release-signing',
+          category: 'android',
+          title: 'Android Release Signing Configuration',
+          status: 'warn',
+          message: `Application module "${project.android.appModule || 'app'}" release build type is configured with debug signing (signingConfigs.debug).`,
+          remediation:
+            'Configure a dedicated release signingConfig in android/' +
+            (project.android.appModule || 'app') +
+            '/build.gradle backed by environment variables (e.g. ANDROID_KEYSTORE_PATH) or Gradle properties before publishing to Google Play.',
+        });
+      } else if (project.android.hasReleaseSigningConfig) {
+        checks.push({
+          id: 'android-release-signing',
+          category: 'android',
+          title: 'Android Release Signing Configuration',
+          status: 'pass',
+          message: `Found dedicated release signing configuration in android/${project.android.appModule || 'app'}/build.gradle.`,
+        });
+      } else if (project.android.buildGradleFound) {
+        checks.push({
+          id: 'android-release-signing',
+          category: 'android',
+          title: 'Android Release Signing Configuration',
+          status: 'warn',
+          message: `No release signing configuration detected in android/${project.android.appModule || 'app'}/build.gradle.`,
+          remediation:
+            'Configure a release signingConfig in android/' +
+            (project.android.appModule || 'app') +
+            '/build.gradle backed by environment variables (e.g. ANDROID_KEYSTORE_PATH) to sign production release builds.',
         });
       }
     }

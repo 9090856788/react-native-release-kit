@@ -97,5 +97,54 @@ jobs:
     expect(res2.valid).toBe(false);
     expect(res2.errors.some((e) => e.includes('steps'))).toBe(true);
   });
-});
 
+  it('validates all bundled static workflow templates in templates/workflows/', async () => {
+    const fs = await import('fs');
+    const path = await import('path');
+
+    const templatesDir = path.resolve(__dirname, '../../templates/workflows');
+    const files = fs.readdirSync(templatesDir).filter((f) => f.endsWith('.yml'));
+
+    expect(files.length).toBeGreaterThanOrEqual(3);
+
+    for (const file of files) {
+      const content = fs.readFileSync(path.join(templatesDir, file), 'utf8');
+      const res = validateWorkflowYaml(content);
+      expect(res.valid, `Template ${file} should be valid YAML: ${res.errors.join(', ')}`).toBe(
+        true,
+      );
+      expect(res.errors).toHaveLength(0);
+      expect(res.parsed).toBeDefined();
+    }
+  });
+
+  it('validates static Fastlane templates align with generator lanes and conventions', async () => {
+    const fs = await import('fs');
+    const path = await import('path');
+
+    const iosPath = path.resolve(__dirname, '../../templates/fastlane/Fastfile.ios');
+    const iosContent = fs.readFileSync(iosPath, 'utf8');
+    expect(iosContent).toContain('lane :build_release');
+    expect(iosContent).toContain('lane :deploy_testflight');
+    expect(iosContent).not.toContain('lane :beta');
+
+    const androidPath = path.resolve(__dirname, '../../templates/fastlane/Fastfile.android');
+    const androidContent = fs.readFileSync(androidPath, 'utf8');
+    expect(androidContent).toContain('lane :build_release');
+    expect(androidContent).toContain('lane :deploy_internal');
+    expect(androidContent).toContain('lane :deploy_closed');
+    expect(androidContent).toContain('lane :deploy_production');
+  });
+
+  it('verifies templates/README.md exists and documents starter templates vs dynamic generator', async () => {
+    const fs = await import('fs');
+    const path = await import('path');
+
+    const readmePath = path.resolve(__dirname, '../../templates/README.md');
+    expect(fs.existsSync(readmePath)).toBe(true);
+
+    const readmeContent = fs.readFileSync(readmePath, 'utf8');
+    expect(readmeContent).toContain('Automatic Generation vs. Static Templates');
+    expect(readmeContent).toContain('setup --provider github-actions');
+  });
+});

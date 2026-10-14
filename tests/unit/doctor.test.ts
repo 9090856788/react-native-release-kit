@@ -101,4 +101,91 @@ describe('Doctor Prerequisite Checks', () => {
     expect(conflictCheck?.message).toContain('Multiple configuration files found');
     expect(conflictCheck?.message).toContain('react-native-release.config.ts');
   });
+
+  it('warns in doctor check when Android release build type uses signingConfigs.debug', async () => {
+    await fs.writeFile(
+      path.join(testDir, 'package.json'),
+      JSON.stringify({
+        name: 'test-app',
+        dependencies: { 'react-native': '0.76.0' },
+      }),
+    );
+    const androidDir = path.join(testDir, 'android');
+    const appDir = path.join(androidDir, 'app');
+    await fs.mkdir(appDir, { recursive: true });
+
+    await fs.writeFile(
+      path.join(appDir, 'build.gradle'),
+      `
+android {
+    namespace "com.vaultguard.app"
+    buildTypes {
+        release {
+            signingConfig signingConfigs.debug
+        }
+    }
+}
+`,
+    );
+    await fs.writeFile(path.join(androidDir, 'gradlew'), '#!/bin/sh\nexit 0\n');
+
+    const report = await runDoctorChecks({
+      cwd: testDir,
+      skipAndroid: false,
+      skipIOS: true,
+    });
+
+    const signingCheck = report.checks.find((c) => c.id === 'android-release-signing');
+    expect(signingCheck).toBeDefined();
+    expect(signingCheck?.status).toBe('warn');
+    expect(signingCheck?.message).toContain('signingConfigs.debug');
+    expect(signingCheck?.remediation).toContain('Configure a dedicated release signingConfig');
+  });
+
+  it('passes in doctor check when Android release build type has dedicated release signingConfig', async () => {
+    await fs.writeFile(
+      path.join(testDir, 'package.json'),
+      JSON.stringify({
+        name: 'test-app',
+        dependencies: { 'react-native': '0.76.0' },
+      }),
+    );
+    const androidDir = path.join(testDir, 'android');
+    const appDir = path.join(androidDir, 'app');
+    await fs.mkdir(appDir, { recursive: true });
+
+    await fs.writeFile(
+      path.join(appDir, 'build.gradle'),
+      `
+android {
+    namespace "com.vaultguard.app"
+    signingConfigs {
+        release {
+            storeFile file(System.getenv("ANDROID_KEYSTORE_PATH") ?: "release.keystore")
+            storePassword System.getenv("ANDROID_KEYSTORE_PASSWORD")
+            keyAlias System.getenv("ANDROID_KEY_ALIAS")
+            keyPassword System.getenv("ANDROID_KEY_PASSWORD")
+        }
+    }
+    buildTypes {
+        release {
+            signingConfig signingConfigs.release
+        }
+    }
+}
+`,
+    );
+    await fs.writeFile(path.join(androidDir, 'gradlew'), '#!/bin/sh\nexit 0\n');
+
+    const report = await runDoctorChecks({
+      cwd: testDir,
+      skipAndroid: false,
+      skipIOS: true,
+    });
+
+    const signingCheck = report.checks.find((c) => c.id === 'android-release-signing');
+    expect(signingCheck).toBeDefined();
+    expect(signingCheck?.status).toBe('pass');
+    expect(signingCheck?.message).toContain('dedicated release signing configuration');
+  });
 });

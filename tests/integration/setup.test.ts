@@ -225,5 +225,255 @@ export default defineConfig({
       .catch(() => false);
     expect(existsAfterForce).toBe(true);
   });
-});
 
+  it('generates iOS build and release jobs when iOS project is enabled and detected', async () => {
+    // Create iOS project structure
+    const iosDir = path.join(testDir, 'ios');
+    await fs.mkdir(path.join(iosDir, 'SampleApp.xcworkspace'), { recursive: true });
+    await fs.writeFile(path.join(iosDir, 'Podfile'), "platform :ios, '14.0'");
+
+    const configContent = `
+import { defineConfig } from 'react-native-release-kit';
+
+export default defineConfig({
+  projectName: 'sample-setup-app',
+  packageManager: 'npm',
+  githubActions: {
+    enabled: true,
+    mainBranch: 'main',
+    releaseTagPattern: 'v*',
+    cacheDependencies: true,
+  },
+  android: {
+    enabled: false,
+  },
+  ios: {
+    enabled: true,
+    teamId: 'TESTTEAM12',
+    uploadToTestFlight: true,
+  },
+});
+`;
+    await fs.writeFile(path.join(testDir, 'react-native-release.config.ts'), configContent);
+
+    const exitCode = await setupCommand({ cwd: testDir });
+    expect(exitCode).toBe(0);
+
+    const workflowsDir = path.join(testDir, '.github', 'workflows');
+    const mainContent = await fs.readFile(path.join(workflowsDir, 'main-build.yml'), 'utf-8');
+    const releaseContent = await fs.readFile(path.join(workflowsDir, 'release-tag.yml'), 'utf-8');
+
+    expect(validateWorkflowYaml(mainContent).valid).toBe(true);
+    expect(mainContent).toContain('build-ios:');
+    expect(mainContent).toContain('Build iOS (Simulator Validation)');
+    expect(mainContent).toContain('-workspace "ios/SampleApp.xcworkspace"');
+
+    expect(validateWorkflowYaml(releaseContent).valid).toBe(true);
+    expect(releaseContent).toContain('release-ios:');
+    expect(releaseContent).toContain('Build & Archive iOS Release');
+    expect(releaseContent).toContain('Validate iOS Release Signing Prerequisites');
+    expect(releaseContent).toContain('Provision iOS Distribution Certificate & Profile');
+    expect(releaseContent).toContain('EFFECTIVE_TEAM_ID="TESTTEAM12"');
+    expect(releaseContent).toContain('Publish to Apple TestFlight');
+  });
+
+  describe('Fastlane Setup Integration (setup --fastlane)', () => {
+    it('generates Fastlane Appfile and Fastfile for Android project', async () => {
+      const configContent = `
+import { defineConfig } from 'react-native-release-kit';
+export default defineConfig({
+  projectName: 'sample-fastlane-app',
+  packageManager: 'npm',
+  android: {
+    enabled: true,
+    applicationId: 'com.sample.fastlaneapp',
+  },
+  ios: {
+    enabled: false,
+  },
+});
+`;
+      await fs.writeFile(path.join(testDir, 'react-native-release.config.ts'), configContent);
+
+      const exitCode = await setupCommand({ cwd: testDir, fastlane: true, provider: 'none' });
+      expect(exitCode).toBe(0);
+
+      const appfilePath = path.join(testDir, 'fastlane', 'Appfile');
+      const fastfilePath = path.join(testDir, 'fastlane', 'Fastfile');
+
+      expect(
+        await fs
+          .stat(appfilePath)
+          .then(() => true)
+          .catch(() => false),
+      ).toBe(true);
+      expect(
+        await fs
+          .stat(fastfilePath)
+          .then(() => true)
+          .catch(() => false),
+      ).toBe(true);
+
+      const appfileContent = await fs.readFile(appfilePath, 'utf-8');
+      const fastfileContent = await fs.readFile(fastfilePath, 'utf-8');
+
+      expect(appfileContent).toContain('com.sample.fastlaneapp');
+      expect(fastfileContent).toContain('platform :android');
+      expect(fastfileContent).toContain('lane :deploy_internal');
+      expect(fastfileContent).toContain('lane :deploy_production');
+      expect(fastfileContent).not.toContain('platform :ios');
+    });
+
+    it('generates Fastlane Appfile and Fastfile for iOS project', async () => {
+      const configContent = `
+import { defineConfig } from 'react-native-release-kit';
+export default defineConfig({
+  projectName: 'sample-ios-fastlane-app',
+  packageManager: 'npm',
+  android: {
+    enabled: false,
+  },
+  ios: {
+    enabled: true,
+    bundleId: 'com.sample.iosfastlane',
+  },
+});
+`;
+      await fs.writeFile(path.join(testDir, 'react-native-release.config.ts'), configContent);
+
+      const exitCode = await setupCommand({ cwd: testDir, fastlane: true, provider: 'none' });
+      expect(exitCode).toBe(0);
+
+      const appfilePath = path.join(testDir, 'fastlane', 'Appfile');
+      const fastfilePath = path.join(testDir, 'fastlane', 'Fastfile');
+
+      const appfileContent = await fs.readFile(appfilePath, 'utf-8');
+      const fastfileContent = await fs.readFile(fastfilePath, 'utf-8');
+
+      expect(appfileContent).toContain('com.sample.iosfastlane');
+      expect(fastfileContent).toContain('platform :ios');
+      expect(fastfileContent).toContain('lane :deploy_testflight');
+      expect(fastfileContent).not.toContain('platform :android');
+    });
+
+    it('refuses to overwrite existing modified Fastlane files without --force', async () => {
+      const configContent = `
+import { defineConfig } from 'react-native-release-kit';
+export default defineConfig({
+  projectName: 'sample-fastlane-app',
+  packageManager: 'npm',
+  android: {
+    enabled: true,
+  },
+});
+`;
+      await fs.writeFile(path.join(testDir, 'react-native-release.config.ts'), configContent);
+
+      const fastlaneDir = path.join(testDir, 'fastlane');
+      await fs.mkdir(fastlaneDir, { recursive: true });
+      const appfilePath = path.join(fastlaneDir, 'Appfile');
+      await fs.writeFile(appfilePath, '# custom user appfile\n');
+
+      const exitCode = await setupCommand({ cwd: testDir, fastlane: true, provider: 'none' });
+      expect(exitCode).toBe(1);
+
+      const content = await fs.readFile(appfilePath, 'utf-8');
+      expect(content).toBe('# custom user appfile\n');
+    });
+
+    it('overwrites existing modified Fastlane files when --force is provided', async () => {
+      const configContent = `
+import { defineConfig } from 'react-native-release-kit';
+export default defineConfig({
+  projectName: 'sample-fastlane-app',
+  packageManager: 'npm',
+  android: {
+    enabled: true,
+    applicationId: 'com.forced.app',
+  },
+});
+`;
+      await fs.writeFile(path.join(testDir, 'react-native-release.config.ts'), configContent);
+
+      const fastlaneDir = path.join(testDir, 'fastlane');
+      await fs.mkdir(fastlaneDir, { recursive: true });
+      const appfilePath = path.join(fastlaneDir, 'Appfile');
+      await fs.writeFile(appfilePath, '# custom user appfile\n');
+
+      const exitCode = await setupCommand({
+        cwd: testDir,
+        fastlane: true,
+        provider: 'none',
+        force: true,
+      });
+      expect(exitCode).toBe(0);
+
+      const content = await fs.readFile(appfilePath, 'utf-8');
+      expect(content).toContain('com.forced.app');
+      expect(content).not.toContain('custom user appfile');
+    });
+
+    it('supports --dry-run for Fastlane files without writing disk', async () => {
+      const configContent = `
+import { defineConfig } from 'react-native-release-kit';
+export default defineConfig({
+  projectName: 'sample-fastlane-app',
+  packageManager: 'npm',
+  android: {
+    enabled: true,
+  },
+});
+`;
+      await fs.writeFile(path.join(testDir, 'react-native-release.config.ts'), configContent);
+
+      const exitCode = await setupCommand({
+        cwd: testDir,
+        fastlane: true,
+        provider: 'none',
+        dryRun: true,
+      });
+      expect(exitCode).toBe(0);
+
+      const fastlaneDir = path.join(testDir, 'fastlane');
+      const exists = await fs
+        .stat(fastlaneDir)
+        .then(() => true)
+        .catch(() => false);
+      expect(exists).toBe(false);
+    });
+
+    it('executes setup --fastlane via Commander CLI', async () => {
+      const configContent = `
+import { defineConfig } from 'react-native-release-kit';
+export default defineConfig({
+  projectName: 'sample-cli-fastlane',
+  packageManager: 'npm',
+  android: {
+    enabled: true,
+    applicationId: 'com.cli.fastlane',
+  },
+});
+`;
+      await fs.writeFile(path.join(testDir, 'react-native-release.config.ts'), configContent);
+
+      const program = createProgram();
+      await program.parseAsync([
+        'node',
+        'react-native-release-kit',
+        '--cwd',
+        testDir,
+        'setup',
+        '--fastlane',
+        '--force',
+      ]);
+
+      const appfilePath = path.join(testDir, 'fastlane', 'Appfile');
+      expect(
+        await fs
+          .stat(appfilePath)
+          .then(() => true)
+          .catch(() => false),
+      ).toBe(true);
+    });
+  });
+});

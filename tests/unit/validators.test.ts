@@ -4,6 +4,7 @@ import {
   validateRequiredSecretNames,
   checkSecretNamesPresent,
   validateConfig,
+  validateIOSBundleId,
 } from '../../src/validators/index.js';
 import { createDefaultConfig } from '../../src/config/defaults.js';
 import { logger } from '../../src/utils/logger.js';
@@ -123,6 +124,32 @@ describe('Validators Subsystem', () => {
       expect(res.config?.signing.ios.appStoreConnectIssuerIdSecretName).toBe('CUSTOM_ISSUER_ID');
     });
 
+    it('validates iOS distribution signing configuration with teamId and certificate secrets', () => {
+      const res = validateConfig({
+        projectName: 'ValidIOSApp',
+        ios: {
+          teamId: 'TEAM123456',
+        },
+        signing: {
+          ios: {
+            enabled: true,
+            teamId: 'TEAM123456',
+            certificateSecretName: 'CUSTOM_IOS_DIST_CERT',
+            certificatePasswordSecretName: 'CUSTOM_IOS_CERT_PWD',
+            provisioningProfileSecretName: 'CUSTOM_IOS_PROV_PROFILE',
+            exportMethod: 'app-store',
+          },
+        },
+      });
+
+      expect(res.valid).toBe(true);
+      expect(res.config?.ios.teamId).toBe('TEAM123456');
+      expect(res.config?.signing.ios.certificateSecretName).toBe('CUSTOM_IOS_DIST_CERT');
+      expect(res.config?.signing.ios.certificatePasswordSecretName).toBe('CUSTOM_IOS_CERT_PWD');
+      expect(res.config?.signing.ios.provisioningProfileSecretName).toBe('CUSTOM_IOS_PROV_PROFILE');
+      expect(res.config?.signing.ios.exportMethod).toBe('app-store');
+    });
+
     it('rejects config when secret names violate conventions', () => {
       const res = validateConfig({
         projectName: 'BadApp',
@@ -135,6 +162,102 @@ describe('Validators Subsystem', () => {
 
       expect(res.valid).toBe(false);
       expect(res.errors.some((e) => e.includes('invalid-name-with-dashes'))).toBe(true);
+
+      const resIOS = validateConfig({
+        projectName: 'BadApp',
+        signing: {
+          ios: {
+            certificateSecretName: 'invalid_cert_secret',
+          },
+        },
+      });
+
+      expect(resIOS.valid).toBe(false);
+      expect(resIOS.errors.some((e) => e.includes('invalid_cert_secret'))).toBe(true);
+    });
+
+    it('validates existing config with Xcode macro bundleId for debug while emitting warning', () => {
+      const res = validateConfig({
+        projectName: 'MacroApp',
+        ios: {
+          bundleId: 'org.reactjs.native.example.$(PRODUCT_NAME:rfc1034identifier)',
+        },
+      });
+
+      // Backward compatible for debug/simulator
+      expect(res.valid).toBe(true);
+      expect(res.warnings).toBeDefined();
+      expect(
+        res.warnings?.some((w) => w.includes('contains an unresolved Xcode build setting macro')),
+      ).toBe(true);
+    });
+
+    it('rejects Xcode macro bundleId when production iOS validation is required', () => {
+      const res = validateConfig(
+        {
+          projectName: 'MacroApp',
+          ios: {
+            bundleId: 'org.reactjs.native.example.$(PRODUCT_NAME:rfc1034identifier)',
+          },
+        },
+        { requireProductionIOS: true },
+      );
+
+      expect(res.valid).toBe(false);
+      expect(
+        res.errors.some((e) => e.includes('contains an unresolved Xcode build setting macro')),
+      ).toBe(true);
+    });
+  });
+
+  describe('iOS Bundle Identifier Validator', () => {
+    it('accepts valid production reverse-DNS bundle identifier', () => {
+      const res = validateIOSBundleId('com.vaultguard.app', { requireProduction: true });
+      expect(res.valid).toBe(true);
+      expect(res.validForProduction).toBe(true);
+      expect(res.validForDebug).toBe(true);
+      expect(res.hasUnresolvedMacro).toBe(false);
+      expect(res.isPlaceholder).toBe(false);
+      expect(res.errors).toHaveLength(0);
+    });
+
+    it('identifies unresolved Xcode macro and flags as valid for debug but invalid for production', () => {
+      const res = validateIOSBundleId(
+        'org.reactjs.native.example.$(PRODUCT_NAME:rfc1034identifier)',
+        { requireProduction: false },
+      );
+      expect(res.valid).toBe(true); // Does not break simulator/debug validation
+      expect(res.validForDebug).toBe(true);
+      expect(res.validForProduction).toBe(false);
+      expect(res.hasUnresolvedMacro).toBe(true);
+      expect(res.isPlaceholder).toBe(true);
+      expect(res.warnings).toHaveLength(1);
+      expect(res.warnings[0]).toContain('contains an unresolved Xcode build setting macro');
+
+      // Fails when production is required
+      const prodRes = validateIOSBundleId(
+        'org.reactjs.native.example.$(PRODUCT_NAME:rfc1034identifier)',
+        { requireProduction: true },
+      );
+      expect(prodRes.valid).toBe(false);
+      expect(prodRes.errors).toHaveLength(1);
+    });
+
+    it('identifies default placeholder prefix and flags as invalid for production', () => {
+      const res = validateIOSBundleId('org.reactjs.native.example.myapp', {
+        requireProduction: true,
+      });
+      expect(res.valid).toBe(false);
+      expect(res.isPlaceholder).toBe(true);
+      expect(res.errors[0]).toContain('uses a default placeholder prefix');
+    });
+
+    it('rejects invalid syntax with spaces or illegal characters for both debug and production', () => {
+      const res = validateIOSBundleId('invalid bundle id with spaces');
+      expect(res.valid).toBe(false);
+      expect(res.validForDebug).toBe(false);
+      expect(res.validForProduction).toBe(false);
+      expect(res.errors[0]).toContain('is not a valid reverse-DNS bundle identifier');
     });
   });
 });

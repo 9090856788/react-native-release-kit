@@ -13,7 +13,7 @@ export function createProgram(): Command {
   program
     .name('react-native-release-kit')
     .description('Opinionated, automated CI/CD and release toolkit for React Native CLI apps')
-    .version('0.1.0', '-v, --version', 'Output the current release-kit version')
+    .version('0.4.0', '-v, --version', 'Output the current release-kit version')
     .option('--verbose', 'Enable verbose debug output')
     .option('--cwd <path>', 'Working directory', process.cwd())
     .hook('preAction', (thisCommand) => {
@@ -74,6 +74,7 @@ export function createProgram(): Command {
       'CI/CD provider (default: github-actions)',
       'github-actions',
     )
+    .option('--fastlane', 'Generate Fastlane Appfile and Fastfile deployment configurations', false)
     .option('--dry-run', 'Preview generated files without writing them', false)
     .option('--diff', 'Display diff against existing files', false)
     .option('--force', 'Overwrite existing workflow files without prompting', false)
@@ -82,6 +83,7 @@ export function createProgram(): Command {
       const exitCode = await setupCommand({
         cwd: globalOpts.cwd,
         provider: options.provider,
+        fastlane: options.fastlane,
         dryRun: options.dryRun,
         diff: options.diff,
         force: options.force,
@@ -94,15 +96,28 @@ export function createProgram(): Command {
   // build command
   program
     .command('build')
-    .description('Build release artifact for specified platform')
+    .description('Build debug or release artifact for specified platform')
     .requiredOption('-p, --platform <platform>', 'Target platform: android or ios')
-    .option('-a, --artifact <artifact>', 'Target artifact: aab, apk, or ipa')
+    .option('--variant <variant>', 'Build variant: debug or release (default: release)')
+    .option(
+      '-a, --artifact <artifact>',
+      'Target artifact: aab, apk, or ipa (defaults to aab for release, apk for debug)',
+    )
+    .option('--module <module>', 'Android application module name (default: auto-detected or app)')
+    .option('--flavor <flavor>', 'Android product flavor')
+    .option('--sign', 'Require and provision release signing credentials', false)
+    .option('--dry-run', 'Validate prerequisites and resolve Gradle task without building', false)
     .action(async (options) => {
       const globalOpts = program.opts<{ cwd?: string }>();
       const exitCode = await buildCommand({
         cwd: globalOpts.cwd,
         platform: options.platform as 'android' | 'ios',
-        artifact: options.artifact as 'aab' | 'apk' | 'ipa',
+        variant: options.variant as 'debug' | 'release' | undefined,
+        artifact: options.artifact as 'aab' | 'apk' | 'ipa' | undefined,
+        appModule: options.module,
+        flavor: options.flavor,
+        sign: options.sign,
+        dryRun: options.dryRun,
       });
       if (exitCode !== 0) {
         process.exit(exitCode);
@@ -114,13 +129,35 @@ export function createProgram(): Command {
     .command('deploy')
     .description('Publish release artifact to store tracks')
     .requiredOption('-p, --platform <platform>', 'Target platform: android or ios')
-    .option('-t, --track <track>', 'Store deployment track (e.g. internal, alpha, testflight)')
+    .option(
+      '-t, --track <track>',
+      'Store deployment track: internal, closed, or production (default: internal)',
+    )
+    .option(
+      '--release-status <status>',
+      'Google Play release status: draft, completed, inProgress, or halted (default: draft)',
+    )
+    .option('--artifact-path <path>', 'Explicit path to the built AAB or APK artifact')
+    .option('--module <module>', 'Android application module name (default: auto-detected or app)')
+    .option('--flavor <flavor>', 'Android product flavor')
+    .option(
+      '--confirm-production',
+      'Explicitly authorize publishing to the production track',
+      false,
+    )
+    .option('--dry-run', 'Validate artifact and credentials without uploading to the store', false)
     .action(async (options) => {
       const globalOpts = program.opts<{ cwd?: string }>();
       const exitCode = await deployCommand({
         cwd: globalOpts.cwd,
         platform: options.platform as 'android' | 'ios',
         track: options.track,
+        releaseStatus: options.releaseStatus,
+        artifactPath: options.artifactPath,
+        appModule: options.module,
+        flavor: options.flavor,
+        confirmProduction: options.confirmProduction,
+        dryRun: options.dryRun,
       });
       if (exitCode !== 0) {
         process.exit(exitCode);

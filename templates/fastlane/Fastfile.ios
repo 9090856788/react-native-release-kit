@@ -1,8 +1,17 @@
 default_platform(:ios)
 
 platform :ios do
+  desc "Build iOS release IPA"
+  lane :build_release do
+    build_app(
+      workspace: ENV["IOS_WORKSPACE"] || "ios/App.xcworkspace",
+      scheme: ENV["IOS_SCHEME"] || "App",
+      export_method: "app-store"
+    )
+  end
+
   desc "Build and upload to Apple TestFlight"
-  lane :beta do
+  lane :deploy_testflight do
     # Authenticate with App Store Connect using API Key
     if ENV["APP_STORE_CONNECT_API_KEY_KEY_ID"] && ENV["APP_STORE_CONNECT_API_KEY_ISSUER_ID"] && ENV["APP_STORE_CONNECT_API_KEY_KEY_CONTENT"]
       app_store_connect_api_key(
@@ -25,3 +34,4 @@ platform :ios do
     )
   end
 end
+

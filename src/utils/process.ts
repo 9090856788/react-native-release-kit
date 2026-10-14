@@ -1,5 +1,5 @@
 import { execa, type Options as ExecaOptions, type ResultPromise } from 'execa';
-import { logger } from './logger.js';
+import { logger, maskSecrets } from './logger.js';
 
 export interface ExecResult {
   stdout: string;
@@ -33,20 +33,37 @@ export async function safeExec(
   };
 
   try {
-    const result = await (execa(file, args, execaOpts) as unknown as ResultPromise);
+    const result = (await (execa(
+      file,
+      args,
+      execaOpts,
+    ) as unknown as ResultPromise)) as unknown as {
+      stdout?: string;
+      stderr?: string;
+      exitCode?: number;
+      failed?: boolean;
+      shortMessage?: string;
+      message?: string;
+    };
+    const isFailed = Boolean(result.failed);
+    const resolvedExitCode =
+      typeof result.exitCode === 'number' ? result.exitCode : isFailed ? 1 : 0;
+    const resolvedStderr = String(
+      result.stderr || (isFailed ? result.shortMessage || result.message || '' : ''),
+    );
     return {
-      stdout: String(result.stdout || ''),
-      stderr: String(result.stderr || ''),
-      exitCode: Number(result.exitCode ?? 0),
-      command: fullCommand,
+      stdout: maskSecrets(String(result.stdout || '')),
+      stderr: maskSecrets(resolvedStderr),
+      exitCode: resolvedExitCode,
+      command: maskSecrets(fullCommand),
     };
   } catch (err: unknown) {
     const e = err as { stdout?: string; stderr?: string; exitCode?: number; message?: string };
     return {
-      stdout: String(e.stdout || ''),
-      stderr: String(e.stderr || e.message || 'Execution failed'),
+      stdout: maskSecrets(String(e.stdout || '')),
+      stderr: maskSecrets(String(e.stderr || e.message || 'Execution failed')),
       exitCode: typeof e.exitCode === 'number' ? e.exitCode : 1,
-      command: fullCommand,
+      command: maskSecrets(fullCommand),
     };
   }
 }

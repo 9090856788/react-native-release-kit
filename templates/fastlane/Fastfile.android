@@ -1,20 +1,54 @@
 default_platform(:android)
 
 platform :android do
-  desc "Build and deploy to Google Play Internal track"
-  lane :deploy_internal do
+  desc "Build Android release artifact"
+  lane :build_release do
     gradle(
       task: "bundleRelease",
       project_dir: "android/"
     )
+  end
 
+  desc "Build and deploy to Google Play Internal testing track"
+  lane :deploy_internal do
     upload_to_play_store(
       track: "internal",
-      release_status: "draft",
+      release_status: ENV["PLAY_RELEASE_STATUS"] || "draft",
+      json_key: ENV["GOOGLE_PLAY_SERVICE_ACCOUNT_JSON_PATH"] || ENV["SUPPLY_JSON_KEY"],
+      aab: ENV["ANDROID_ARTIFACT_PATH"],
+      skip_upload_metadata: true,
+      skip_upload_images: true,
+      skip_upload_screenshots: true
+    )
+  end
+
+  desc "Deploy to Google Play Closed testing track"
+  lane :deploy_closed do
+    upload_to_play_store(
+      track: ENV["PLAY_CLOSED_TRACK_NAME"] || "alpha",
+      release_status: ENV["PLAY_RELEASE_STATUS"] || "draft",
+      json_key: ENV["GOOGLE_PLAY_SERVICE_ACCOUNT_JSON_PATH"] || ENV["SUPPLY_JSON_KEY"],
+      aab: ENV["ANDROID_ARTIFACT_PATH"],
+      skip_upload_metadata: true,
+      skip_upload_images: true,
+      skip_upload_screenshots: true
+    )
+  end
+
+  desc "Deploy to Google Play Production track"
+  lane :deploy_production do
+    unless ENV["ALLOW_PRODUCTION_RELEASE"] == "true"
+      UI.user_error!("Production release blocked. Set ALLOW_PRODUCTION_RELEASE=true to authorize production rollout.")
+    end
+
+    upload_to_play_store(
+      track: "production",
+      release_status: ENV["PLAY_RELEASE_STATUS"] || "draft",
+      json_key: ENV["GOOGLE_PLAY_SERVICE_ACCOUNT_JSON_PATH"] || ENV["SUPPLY_JSON_KEY"],
+      aab: ENV["ANDROID_ARTIFACT_PATH"],
       skip_upload_metadata: true,
       skip_upload_images: true,
       skip_upload_screenshots: true
     )
   end
 end
-

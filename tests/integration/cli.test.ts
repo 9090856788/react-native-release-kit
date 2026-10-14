@@ -21,6 +21,7 @@ describe('CLI Integration', () => {
 
   it('exposes expected commands on program instance', () => {
     const program = createProgram();
+    expect(program.version()).toBe('0.4.0');
     const commandNames = program.commands.map((c) => c.name());
 
     expect(commandNames).toContain('init');

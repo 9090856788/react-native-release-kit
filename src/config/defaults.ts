@@ -1,11 +1,30 @@
 import type { ReleaseKitUserConfig, PackageManager } from './schema.js';
 
-export function getDefaultScripts(pm: PackageManager = 'npm') {
+export function getDefaultScripts(
+  pm: PackageManager = 'npm',
+  availableScripts?: Record<string, string>,
+): { lint?: string; typecheck?: string; test?: string } {
   const runner = pm === 'npm' ? 'npm run' : pm;
   const testRunner = pm === 'npm' ? 'npm test' : `${pm} test`;
+
+  if (availableScripts) {
+    const resolved: { lint?: string; typecheck?: string; test?: string } = {};
+    if (availableScripts['lint']) {
+      resolved.lint = `${runner} lint`;
+    }
+    if (availableScripts['typecheck']) {
+      resolved.typecheck = `${runner} typecheck`;
+    } else if (availableScripts['type-check']) {
+      resolved.typecheck = `${runner} type-check`;
+    }
+    if (availableScripts['test']) {
+      resolved.test = testRunner;
+    }
+    return resolved;
+  }
+
   return {
     lint: `${runner} lint`,
-    typecheck: `${runner} typecheck`,
     test: testRunner,
   };
 }
@@ -32,6 +51,8 @@ export function createDefaultConfig(
       scheme: projectName,
       exportMethod: 'app-store',
       packagePath: 'ios',
+      publishStore: false,
+      uploadToTestFlight: false,
     },
     githubActions: {
       enabled: true,

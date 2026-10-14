@@ -163,4 +163,40 @@ describe('Init Command', () => {
     expect(loaded.config?.projectName).toBe('upgraded-ts-app');
     expect(loaded.warnings).toBeUndefined();
   });
+
+  it('does not inject npm run typecheck when package.json has lint and test but no typecheck script', async () => {
+    await fs.writeFile(
+      path.join(testDir, 'package.json'),
+      JSON.stringify({
+        name: 'vaultguard-mock',
+        dependencies: {
+          'react-native': '0.76.2',
+        },
+        scripts: {
+          lint: 'eslint .',
+          test: 'jest',
+        },
+      }),
+    );
+
+    const exitCode = await initCommand({
+      cwd: testDir,
+      yes: true,
+    });
+
+    expect(exitCode).toBe(0);
+    const newTsPath = path.join(testDir, 'react-native-release.config.ts');
+    expect(existsSync(newTsPath)).toBe(true);
+
+    const content = await fs.readFile(newTsPath, 'utf-8');
+    expect(content).toContain('lint');
+    expect(content).toContain('test');
+    expect(content).not.toContain('npm run typecheck');
+    expect(content).not.toContain('"typecheck"');
+
+    const loaded = await loadConfig(testDir);
+    expect(loaded.config?.scripts.lint).toBe('npm run lint');
+    expect(loaded.config?.scripts.test).toBe('npm test');
+    expect(loaded.config?.scripts.typecheck).toBeUndefined();
+  });
 });

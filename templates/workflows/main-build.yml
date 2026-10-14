@@ -77,3 +77,46 @@ jobs:
           path: android/app/build/outputs/bundle/debug/*.aab
           if-no-files-found: error
           retention-days: 14
+
+  build-ios:
+    name: Build iOS (Simulator Validation)
+    needs: verify
+    runs-on: macos-14
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Setup Node.js
+        uses: actions/setup-node@1d0ff469b7ec7b3cb9d8673fde0c81c44821de2a # v4.2.0
+        with:
+          node-version: '20'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install CocoaPods dependencies
+        run: |
+          cd "ios"
+          pod install
+
+      - name: Build iOS App (Simulator)
+        run: |
+          xcodebuild \
+            -workspace "ios/App.xcworkspace" \
+            -scheme "App" \
+            -configuration Debug \
+            -sdk iphonesimulator \
+            -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath "ios/build" \
+            CODE_SIGNING_ALLOWED=NO \
+            build
+
+      - name: Upload iOS Build Artifact
+        uses: actions/upload-artifact@4cec3d8aa04e39d1a68397de0c4cd6fb9dce8ec1 # v4.6.1
+        with:
+          name: ios-${{ github.sha }}-simulator
+          path: ios/build/Build/Products/Debug-iphonesimulator/*.app
+          if-no-files-found: error
+          retention-days: 14
+

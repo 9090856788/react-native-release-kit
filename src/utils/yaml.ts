@@ -116,4 +116,3 @@ export function validateWorkflowYaml(yamlContent: string): YamlValidationResult 
     parsed: doc,
   };
 }
-

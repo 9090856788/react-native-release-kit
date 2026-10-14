@@ -12,8 +12,15 @@ interface PackageJsonShape {
   devDependencies?: Record<string, string>;
 }
 
+export interface DetectProjectOptions {
+  androidPackagePath?: string;
+  androidAppModule?: string;
+  iosPackagePath?: string;
+}
+
 export async function detectProject(
   projectDir: string = process.cwd(),
+  options: DetectProjectOptions = {},
 ): Promise<ProjectDetectionResult> {
   const packageJsonPath = path.resolve(projectDir, 'package.json');
   const pkg = await readJsonFile<PackageJsonShape>(packageJsonPath);
@@ -24,8 +31,13 @@ export async function detectProject(
 
   const projectName = pkg?.name || path.basename(projectDir);
   const packageManager = detectPackageManager(projectDir);
-  const android = await detectAndroid(projectDir);
-  const ios = await detectIOS(projectDir);
+  const android = await detectAndroid(projectDir, {
+    packagePath: options.androidPackagePath,
+    appModule: options.androidAppModule,
+  });
+  const ios = await detectIOS(projectDir, {
+    packagePath: options.iosPackagePath,
+  });
 
   return {
     isReactNative,

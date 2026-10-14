@@ -6,8 +6,14 @@ export type PackageManager = z.infer<typeof PackageManagerSchema>;
 export const AndroidArtifactSchema = z.enum(['aab', 'apk']);
 export type AndroidArtifact = z.infer<typeof AndroidArtifactSchema>;
 
-export const AndroidTrackSchema = z.enum(['internal', 'alpha', 'beta', 'production']);
+export const AndroidVariantSchema = z.enum(['debug', 'release']);
+export type AndroidVariant = z.infer<typeof AndroidVariantSchema>;
+
+export const AndroidTrackSchema = z.enum(['internal', 'closed', 'alpha', 'beta', 'production']);
 export type AndroidTrack = z.infer<typeof AndroidTrackSchema>;
+
+export const AndroidReleaseStatusSchema = z.enum(['completed', 'draft', 'inProgress', 'halted']);
+export type AndroidReleaseStatus = z.infer<typeof AndroidReleaseStatusSchema>;
 
 export const IOSArtifactSchema = z.enum(['ipa', 'app']);
 export type IOSArtifact = z.infer<typeof IOSArtifactSchema>;
@@ -17,50 +23,112 @@ export type IOSExportMethod = z.infer<typeof IOSExportMethodSchema>;
 
 export const ScriptsConfigSchema = z
   .object({
-    lint: z.string().default('npm run lint'),
-    typecheck: z.string().default('npm run typecheck'),
-    test: z.string().default('npm test'),
+    lint: z.string().optional(),
+    typecheck: z.string().optional(),
+    test: z.string().optional(),
   })
-  .default({
-    lint: 'npm run lint',
-    typecheck: 'npm run typecheck',
-    test: 'npm test',
-  });
+  .default({});
 
 export const AndroidConfigSchema = z
   .object({
     enabled: z.boolean().default(true),
+    buildVariant: AndroidVariantSchema.default('release'),
     buildArtifact: AndroidArtifactSchema.default('aab'),
-    buildTask: z.string().default('bundleRelease'),
+    buildTask: z
+      .string()
+      .refine((val) => !/[\r\n"`;$&|<>]/.test(val) && !val.includes('..'), {
+        message: 'buildTask must not contain shell metacharacters or "..".',
+      })
+      .default('bundleRelease'),
+    appModule: z
+      .string()
+      .regex(/^:?[a-zA-Z0-9_-]+(?::[a-zA-Z0-9_-]+)*$/, {
+        message:
+          'Invalid appModule format. Expected standard Gradle module name (e.g. "app" or ":clientApp").',
+      })
+      .default('app'),
+    flavor: z
+      .string()
+      .regex(/^[a-zA-Z0-9_-]+$/, {
+        message:
+          'Invalid flavor. Expected alphanumeric identifier (e.g. "staging" or "production").',
+      })
+      .optional(),
     deploymentTrack: AndroidTrackSchema.default('internal'),
+    releaseStatus: AndroidReleaseStatusSchema.default('draft'),
     applicationId: z.string().optional(),
-    packagePath: z.string().default('android'),
+    packagePath: z
+      .string()
+      .refine(
+        (val) =>
+          !val.startsWith('/') &&
+          !val.startsWith('\\') &&
+          !val.includes('..') &&
+          !/[\r\n"`;$&|<>]/.test(val),
+        { message: 'packagePath must be a relative path without ".." or shell metacharacters.' },
+      )
+      .default('android'),
     publishStore: z.boolean().default(false),
+    allowProductionPublish: z.boolean().default(false),
   })
   .default({
     enabled: true,
+    buildVariant: 'release',
     buildArtifact: 'aab',
     buildTask: 'bundleRelease',
+    appModule: 'app',
     deploymentTrack: 'internal',
+    releaseStatus: 'draft',
     packagePath: 'android',
     publishStore: false,
+    allowProductionPublish: false,
   });
 
 export const IOSConfigSchema = z
   .object({
     enabled: z.boolean().default(true),
     buildArtifact: IOSArtifactSchema.default('ipa'),
-    scheme: z.string().optional(),
-    workspace: z.string().optional(),
+    scheme: z
+      .string()
+      .refine((val) => !/[\r\n"`;$&|<>]/.test(val) && !val.includes('..'), {
+        message: 'Invalid iOS scheme name contains forbidden characters.',
+      })
+      .optional(),
+    workspace: z
+      .string()
+      .refine(
+        (val) =>
+          !val.startsWith('/') &&
+          !val.startsWith('\\') &&
+          !val.includes('..') &&
+          !/[\r\n"`;$&|<>]/.test(val),
+        { message: 'workspace must be a relative path without ".." or shell metacharacters.' },
+      )
+      .optional(),
     bundleId: z.string().optional(),
+    teamId: z.string().optional(),
     exportMethod: IOSExportMethodSchema.default('app-store'),
-    packagePath: z.string().default('ios'),
+    packagePath: z
+      .string()
+      .refine(
+        (val) =>
+          !val.startsWith('/') &&
+          !val.startsWith('\\') &&
+          !val.includes('..') &&
+          !/[\r\n"`;$&|<>]/.test(val),
+        { message: 'packagePath must be a relative path without ".." or shell metacharacters.' },
+      )
+      .default('ios'),
+    publishStore: z.boolean().default(false),
+    uploadToTestFlight: z.boolean().default(false),
   })
   .default({
     enabled: true,
     buildArtifact: 'ipa',
     exportMethod: 'app-store',
     packagePath: 'ios',
+    publishStore: false,
+    uploadToTestFlight: false,
   });
 
 export const GitHubActionsRunnerSchema = z
@@ -151,20 +219,35 @@ export const GitHubActionsConfigSchema = z
 
 export const AndroidSigningConfigSchema = z
   .object({
+    enabled: z.boolean().default(false),
+    keystorePath: z.string().optional(),
     keystoreSecretName: z.string().default('ANDROID_KEYSTORE_BASE64'),
+    keystorePathEnvName: z.string().default('ANDROID_KEYSTORE_PATH'),
     keystorePasswordSecretName: z.string().default('ANDROID_KEYSTORE_PASSWORD'),
     keyAliasSecretName: z.string().default('ANDROID_KEY_ALIAS'),
     keyPasswordSecretName: z.string().default('ANDROID_KEY_PASSWORD'),
+    serviceAccountSecretName: z.string().default('GOOGLE_PLAY_SERVICE_ACCOUNT_JSON'),
+    serviceAccountPathEnvName: z.string().default('GOOGLE_PLAY_SERVICE_ACCOUNT_JSON_PATH'),
   })
   .default({
+    enabled: false,
     keystoreSecretName: 'ANDROID_KEYSTORE_BASE64',
+    keystorePathEnvName: 'ANDROID_KEYSTORE_PATH',
     keystorePasswordSecretName: 'ANDROID_KEYSTORE_PASSWORD',
     keyAliasSecretName: 'ANDROID_KEY_ALIAS',
     keyPasswordSecretName: 'ANDROID_KEY_PASSWORD',
+    serviceAccountSecretName: 'GOOGLE_PLAY_SERVICE_ACCOUNT_JSON',
+    serviceAccountPathEnvName: 'GOOGLE_PLAY_SERVICE_ACCOUNT_JSON_PATH',
   });
 
 export const IOSSigningConfigSchema = z
   .object({
+    enabled: z.boolean().default(false),
+    teamId: z.string().optional(),
+    certificateSecretName: z.string().default('IOS_DISTRIBUTION_CERTIFICATE_BASE64'),
+    certificatePasswordSecretName: z.string().default('IOS_CERTIFICATE_PASSWORD'),
+    provisioningProfileSecretName: z.string().default('IOS_PROVISIONING_PROFILE_BASE64'),
+    exportMethod: IOSExportMethodSchema.default('app-store'),
     // Primary secret name for API key content (.p8 content or base64)
     appStoreConnectKeyContentSecretName: z.string().optional(),
     // Backward-compatible alias for appStoreConnectKeyContentSecretName
@@ -181,6 +264,14 @@ export const IOSSigningConfigSchema = z
       'APP_STORE_CONNECT_API_KEY_KEY_CONTENT';
 
     return {
+      enabled: val.enabled ?? false,
+      teamId: val.teamId,
+      certificateSecretName: val.certificateSecretName ?? 'IOS_DISTRIBUTION_CERTIFICATE_BASE64',
+      certificatePasswordSecretName:
+        val.certificatePasswordSecretName ?? 'IOS_CERTIFICATE_PASSWORD',
+      provisioningProfileSecretName:
+        val.provisioningProfileSecretName ?? 'IOS_PROVISIONING_PROFILE_BASE64',
+      exportMethod: val.exportMethod ?? 'app-store',
       appStoreConnectKeyContentSecretName: keyContentSecret,
       appStoreConnectApiKeySecretName: keyContentSecret,
       appStoreConnectKeyIdSecretName: val.appStoreConnectKeyIdSecretName,
@@ -188,6 +279,11 @@ export const IOSSigningConfigSchema = z
     };
   })
   .default({
+    enabled: false,
+    certificateSecretName: 'IOS_DISTRIBUTION_CERTIFICATE_BASE64',
+    certificatePasswordSecretName: 'IOS_CERTIFICATE_PASSWORD',
+    provisioningProfileSecretName: 'IOS_PROVISIONING_PROFILE_BASE64',
+    exportMethod: 'app-store',
     appStoreConnectKeyContentSecretName: 'APP_STORE_CONNECT_API_KEY_KEY_CONTENT',
     appStoreConnectApiKeySecretName: 'APP_STORE_CONNECT_API_KEY_KEY_CONTENT',
     appStoreConnectKeyIdSecretName: 'APP_STORE_CONNECT_API_KEY_KEY_ID',
@@ -197,10 +293,14 @@ export const IOSSigningConfigSchema = z
 export const SigningConfigSchema = z
   .object({
     android: AndroidSigningConfigSchema.default({
+      enabled: false,
       keystoreSecretName: 'ANDROID_KEYSTORE_BASE64',
+      keystorePathEnvName: 'ANDROID_KEYSTORE_PATH',
       keystorePasswordSecretName: 'ANDROID_KEYSTORE_PASSWORD',
       keyAliasSecretName: 'ANDROID_KEY_ALIAS',
       keyPasswordSecretName: 'ANDROID_KEY_PASSWORD',
+      serviceAccountSecretName: 'GOOGLE_PLAY_SERVICE_ACCOUNT_JSON',
+      serviceAccountPathEnvName: 'GOOGLE_PLAY_SERVICE_ACCOUNT_JSON_PATH',
     }),
     ios: IOSSigningConfigSchema.default({
       appStoreConnectKeyContentSecretName: 'APP_STORE_CONNECT_API_KEY_KEY_CONTENT',
@@ -211,10 +311,14 @@ export const SigningConfigSchema = z
   })
   .default({
     android: {
+      enabled: false,
       keystoreSecretName: 'ANDROID_KEYSTORE_BASE64',
+      keystorePathEnvName: 'ANDROID_KEYSTORE_PATH',
       keystorePasswordSecretName: 'ANDROID_KEYSTORE_PASSWORD',
       keyAliasSecretName: 'ANDROID_KEY_ALIAS',
       keyPasswordSecretName: 'ANDROID_KEY_PASSWORD',
+      serviceAccountSecretName: 'GOOGLE_PLAY_SERVICE_ACCOUNT_JSON',
+      serviceAccountPathEnvName: 'GOOGLE_PLAY_SERVICE_ACCOUNT_JSON_PATH',
     },
     ios: {
       appStoreConnectKeyContentSecretName: 'APP_STORE_CONNECT_API_KEY_KEY_CONTENT',
@@ -228,18 +332,18 @@ export const ReleaseKitConfigSchema = z.object({
   projectName: z.string().min(1, 'Project name is required'),
   packageManager: PackageManagerSchema.default('npm'),
   projectRoot: z.string().default('.'),
-  scripts: ScriptsConfigSchema.default({
-    lint: 'npm run lint',
-    typecheck: 'npm run typecheck',
-    test: 'npm test',
-  }),
+  scripts: ScriptsConfigSchema.default({}),
   android: AndroidConfigSchema.default({
     enabled: true,
+    buildVariant: 'release',
     buildArtifact: 'aab',
     buildTask: 'bundleRelease',
+    appModule: 'app',
     deploymentTrack: 'internal',
+    releaseStatus: 'draft',
     packagePath: 'android',
     publishStore: false,
+    allowProductionPublish: false,
   }),
   ios: IOSConfigSchema.default({
     enabled: true,
@@ -274,10 +378,14 @@ export const ReleaseKitConfigSchema = z.object({
   }),
   signing: SigningConfigSchema.default({
     android: {
+      enabled: false,
       keystoreSecretName: 'ANDROID_KEYSTORE_BASE64',
+      keystorePathEnvName: 'ANDROID_KEYSTORE_PATH',
       keystorePasswordSecretName: 'ANDROID_KEYSTORE_PASSWORD',
       keyAliasSecretName: 'ANDROID_KEY_ALIAS',
       keyPasswordSecretName: 'ANDROID_KEY_PASSWORD',
+      serviceAccountSecretName: 'GOOGLE_PLAY_SERVICE_ACCOUNT_JSON',
+      serviceAccountPathEnvName: 'GOOGLE_PLAY_SERVICE_ACCOUNT_JSON_PATH',
     },
     ios: {
       appStoreConnectKeyContentSecretName: 'APP_STORE_CONNECT_API_KEY_KEY_CONTENT',

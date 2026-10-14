@@ -91,9 +91,14 @@ export async function loadConfig(cwd: string = process.cwd()): Promise<LoadedCon
     if (configPath.endsWith('.json')) {
       rawConfig = await readJsonFile(configPath);
     } else {
+      if (typeof require !== 'undefined' && require.cache && require.cache[configPath]) {
+        delete require.cache[configPath];
+      }
       const packageEntry = resolvePackageEntryPath();
       const jiti = createJiti(cwd, {
         interopDefault: true,
+        fsCache: false,
+        moduleCache: false,
         alias: packageEntry ? { 'react-native-release-kit': packageEntry } : {},
       });
       const imported = await jiti.import(configPath);

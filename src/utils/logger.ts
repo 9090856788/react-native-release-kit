@@ -8,6 +8,8 @@ export interface LoggerOptions {
 }
 
 const SECRET_PATTERNS = [
+  /-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z0-9 ]*PRIVATE KEY-----/g,
+  /"private_key"\s*:\s*"[^"]+"/gi,
   /password\s*[:=]\s*([^\s,;]+)/gi,
   /secret\s*[:=]\s*([^\s,;]+)/gi,
   /token\s*[:=]\s*([^\s,;]+)/gi,
@@ -17,10 +19,41 @@ const SECRET_PATTERNS = [
   /github_pat_[a-zA-Z0-9_]{20,}/g,
 ];
 
+const registeredSecrets = new Set<string>();
+
+/**
+ * Registers a sensitive runtime value so any accidental occurrence in logs or subprocess output is redacted.
+ */
+export function registerSecretForRedaction(secretValue: string | undefined): void {
+  if (!secretValue) return;
+  const trimmed = secretValue.trim();
+  if (trimmed.length >= 4) {
+    registeredSecrets.add(trimmed);
+  }
+}
+
+export function clearRegisteredSecrets(): void {
+  registeredSecrets.clear();
+}
+
 export function maskSecrets(message: string): string {
+  if (!message) return message;
   let sanitized = message;
+
+  for (const secret of registeredSecrets) {
+    if (sanitized.includes(secret)) {
+      sanitized = sanitized.split(secret).join('[REDACTED]');
+    }
+  }
+
   for (const pattern of SECRET_PATTERNS) {
     sanitized = sanitized.replace(pattern, (match) => {
+      if (match.startsWith('-----BEGIN')) {
+        return '[REDACTED_PRIVATE_KEY]';
+      }
+      if (match.toLowerCase().startsWith('"private_key"')) {
+        return '"private_key": "[REDACTED]"';
+      }
       if (match.includes(':') || match.includes('=')) {
         const parts = match.split(/[:=]/);
         return `${parts[0]}: [REDACTED]`;

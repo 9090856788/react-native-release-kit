@@ -5,6 +5,7 @@ import pc from 'picocolors';
 import { input, select, confirm } from '@inquirer/prompts';
 import { detectProject } from '../detector/project.js';
 import { findAllConfigFiles } from '../config/loader.js';
+import { getDefaultScripts } from '../config/defaults.js';
 import { safeWriteFile, readFileUtf8 } from '../utils/fs.js';
 import { formatUnifiedDiff, generateDiff } from '../utils/diff.js';
 import { logger } from '../utils/logger.js';
@@ -55,6 +56,16 @@ export async function initCommand(options: InitCommandOptions = {}): Promise<num
     logger.warn('Continuing anyway, but standard CLI paths might differ.');
   }
 
+  if (
+    detected.ios.hasIOS &&
+    detected.ios.bundleId &&
+    (detected.ios.hasUnresolvedBundleIdMacro || detected.ios.isPlaceholderBundleId)
+  ) {
+    logger.warn(
+      `Detected iOS bundle identifier "${detected.ios.bundleId}" contains an unresolved Xcode macro or placeholder. Update "ios.bundleId" in ${targetFileName} before production iOS release.`,
+    );
+  }
+
   // Check if any existing config file exists
   const existingConfigs = findAllConfigFiles(cwd);
   const primaryExisting = existingConfigs[0] || null;
@@ -85,17 +96,12 @@ export async function initCommand(options: InitCommandOptions = {}): Promise<num
       projectName: detected.projectName,
       packageManager: detected.packageManager.manager,
       projectRoot: '.',
-      scripts: {
-        lint: detected.scripts['lint']
-          ? `${detected.packageManager.manager} run lint`
-          : 'npm run lint',
-        typecheck: detected.scripts['typecheck']
-          ? `${detected.packageManager.manager} run typecheck`
-          : 'npm run typecheck',
-        test: detected.scripts['test'] ? `${detected.packageManager.manager} test` : 'npm test',
-      },
+      scripts: getDefaultScripts(detected.packageManager.manager, detected.scripts),
       android: {
         enabled: detected.android.hasAndroid,
+        ...(detected.android.appModule && detected.android.appModule !== 'app'
+          ? { appModule: detected.android.appModule }
+          : {}),
         buildArtifact: 'aab',
         buildTask: 'bundleRelease',
         deploymentTrack: 'internal',
@@ -201,6 +207,9 @@ export async function initCommand(options: InitCommandOptions = {}): Promise<num
 
       androidConfig = {
         enabled: true,
+        ...(detected.android.appModule && detected.android.appModule !== 'app'
+          ? { appModule: detected.android.appModule }
+          : {}),
         buildArtifact,
         buildTask: buildArtifact === 'aab' ? 'bundleRelease' : 'assembleRelease',
         deploymentTrack,
@@ -259,11 +268,7 @@ export async function initCommand(options: InitCommandOptions = {}): Promise<num
       projectName,
       packageManager,
       projectRoot: '.',
-      scripts: {
-        lint: `${packageManager === 'npm' ? 'npm run' : packageManager} lint`,
-        typecheck: `${packageManager === 'npm' ? 'npm run' : packageManager} typecheck`,
-        test: `${packageManager === 'npm' ? 'npm test' : `${packageManager} test`}`,
-      },
+      scripts: getDefaultScripts(packageManager, detected.scripts),
       android: androidConfig,
       ios: iosConfig,
       githubActions: {
