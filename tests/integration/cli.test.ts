@@ -9,9 +9,7 @@ import { execa } from 'execa';
 import { createProgram } from '../../src/cli/index.js';
 
 const repoRoot = path.resolve(__dirname, '../../');
-const packageJson = JSON.parse(
-  readFileSync(path.join(repoRoot, 'package.json'), 'utf8'),
-);
+const packageJson = JSON.parse(readFileSync(path.join(repoRoot, 'package.json'), 'utf8'));
 
 describe('CLI Integration', () => {
   let testDir: string;

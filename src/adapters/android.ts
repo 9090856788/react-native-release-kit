@@ -13,6 +13,7 @@ import { validateRequiredSecretNames } from '../validators/secrets.js';
 import { safeExec } from '../utils/process.js';
 import { logger, maskSecrets, registerSecretForRedaction } from '../utils/logger.js';
 import { readFileUtf8 } from '../utils/fs.js';
+import { configureAndroidReleaseSigning } from './android-signing-config.js';
 
 export const SUPPORTED_ANDROID_TRACKS: readonly AndroidTrack[] = [
   'internal',
@@ -665,17 +666,37 @@ export class AndroidAdapter {
     });
 
     if (shouldSign && detection.usesDebugSigningInRelease) {
-      return {
-        success: false,
-        artifactType: artifact,
-        variant,
-        flavor,
-        appModule,
-        gradleTask,
-        durationMs: Date.now() - startTime,
-        error: `Unsafe Android release signing configuration: application module "${appModule}" has "signingConfig signingConfigs.debug" configured for the release build type in build.gradle. Gradle would silently sign this release artifact with the insecure debug key.`,
-        remediation: `Configure a dedicated release signingConfig in android/${appModule}/build.gradle backed by environment variables (e.g. ANDROID_KEYSTORE_PATH) or Gradle properties before building signed releases.`,
-      };
+      try {
+        const configResult = await configureAndroidReleaseSigning({
+          projectRoot: cwd,
+          androidDir: validation.androidDir,
+          appModule,
+          dryRun: options.dryRun,
+        });
+        if (configResult.changed) {
+          if (options.dryRun) {
+            logger.info(
+              `[DRY RUN] Would configure Android release signing in ${configResult.filePath}.`,
+            );
+          } else {
+            logger.info(
+              `Automatically configured Android release signing in ${configResult.filePath}.`,
+            );
+          }
+        }
+      } catch {
+        return {
+          success: false,
+          artifactType: artifact,
+          variant,
+          flavor,
+          appModule,
+          gradleTask,
+          durationMs: Date.now() - startTime,
+          error: `Unsafe Android release signing configuration: application module "${appModule}" has "signingConfig signingConfigs.debug" configured for the release build type in build.gradle. Gradle would silently sign this release artifact with the insecure debug key.`,
+          remediation: `Configure a dedicated release signingConfig in android/${appModule}/build.gradle backed by environment variables (e.g. ANDROID_KEYSTORE_PATH) or Gradle properties before building signed releases.`,
+        };
+      }
     }
 
     if (!shouldSign && variant === 'release' && detection.usesDebugSigningInRelease) {

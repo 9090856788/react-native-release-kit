@@ -195,16 +195,16 @@ describe('Phase F Step 3 — Publishing Safety Matrix', () => {
 
   // 2. Debug-signed Android release
   describe('Matrix 2: Debug-signed Android release', () => {
-    it('blocks AndroidAdapter build when release variant is configured with debug signingConfig', async () => {
+    it('blocks AndroidAdapter build when release variant is configured with debug signingConfig and cannot be safely remediated', async () => {
       const androidDir = path.join(testDir, 'android', 'app');
       await fs.mkdir(androidDir, { recursive: true });
       await fs.writeFile(
-        path.join(androidDir, 'build.gradle'),
+        path.join(androidDir, 'build.gradle.kts'),
         `
         android {
             buildTypes {
                 release {
-                    signingConfig signingConfigs.debug
+                    signingConfig = signingConfigs.getByName("debug")
                 }
             }
         }

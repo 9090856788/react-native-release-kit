@@ -672,13 +672,14 @@ exit 1
       expect(res.stderr).toContain('[REDACTED]');
     });
 
-    it('fails when building signed release if release build type uses debug signing (VaultGuard issue)', async () => {
+    it('automatically configures release signing when building signed release with Groovy debug signing', async () => {
       const androidDir = path.join(testDir, 'android');
       const appDir = path.join(androidDir, 'app');
       await fs.mkdir(appDir, { recursive: true });
 
+      const gradlePath = path.join(appDir, 'build.gradle');
       await fs.writeFile(
-        path.join(appDir, 'build.gradle'),
+        gradlePath,
         `
 plugins {
     id("com.android.application")
@@ -689,6 +690,74 @@ android {
     buildTypes {
         release {
             signingConfig signingConfigs.debug
+        }
+    }
+}
+`,
+      );
+
+      const keystorePath = path.join(testDir, 'release.keystore');
+      await fs.writeFile(keystorePath, 'fake-keystore-content');
+
+      await fs.writeFile(
+        path.join(androidDir, 'gradlew'),
+        `#!/bin/sh
+mkdir -p app/build/outputs/bundle/release
+echo "VALID_AAB" > app/build/outputs/bundle/release/app-release.aab
+exit 0
+`,
+        { mode: 0o755 },
+      );
+
+      const config = createTestConfig({
+        signing: {
+          ...createTestConfig().signing,
+          android: {
+            ...createTestConfig().signing.android,
+            keystorePath,
+          },
+        },
+      });
+      const adapter = new AndroidAdapter(config);
+
+      const res = await adapter.build({
+        cwd: testDir,
+        variant: 'release',
+        artifact: 'aab',
+        sign: true,
+        skipEnvCheck: true,
+        env: {
+          ...process.env,
+          ANDROID_KEYSTORE_PASSWORD: 'test-password',
+          ANDROID_KEY_ALIAS: 'test-alias',
+          ANDROID_KEY_PASSWORD: 'test-password',
+        },
+      });
+
+      expect(res.success).toBe(true);
+      const updatedGradle = await fs.readFile(gradlePath, 'utf8');
+      expect(updatedGradle).toContain('signingConfig signingConfigs.release');
+      expect(updatedGradle).toContain('System.getenv("ANDROID_KEYSTORE_PATH")');
+      expect(updatedGradle).not.toContain('signingConfig signingConfigs.debug');
+    });
+
+    it('fails when building signed release if release build type uses debug signing and cannot be auto-configured (e.g. Kotlin DSL)', async () => {
+      const androidDir = path.join(testDir, 'android');
+      const appDir = path.join(androidDir, 'app');
+      await fs.mkdir(appDir, { recursive: true });
+
+      await fs.writeFile(
+        path.join(appDir, 'build.gradle.kts'),
+        `
+plugins {
+    id("com.android.application")
+}
+android {
+    namespace = "com.unsafe.app"
+    defaultConfig { applicationId = "com.unsafe.app" }
+    buildTypes {
+        release {
+            signingConfig = signingConfigs.getByName("debug")
         }
     }
 }

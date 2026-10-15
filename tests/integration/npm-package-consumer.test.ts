@@ -119,9 +119,7 @@ describe('Phase H Step 3 — Isolated Packed Package Consumer Test', () => {
     expect(helpRes.stdout).toContain('build');
     expect(helpRes.stdout).toContain('deploy');
 
-    const rootPkg = JSON.parse(
-      await fs.readFile(path.join(repoRoot, 'package.json'), 'utf8'),
-    );
+    const rootPkg = JSON.parse(await fs.readFile(path.join(repoRoot, 'package.json'), 'utf8'));
     const versionRes = await execa(binPath, ['--version'], { cwd: consumerDir });
     expect(versionRes.exitCode).toBe(0);
     expect(versionRes.stdout.trim()).toBe(rootPkg.version);
