@@ -342,6 +342,47 @@ android {
       expect(res.errors[0]).toContain('does not contain valid base64-encoded keystore data');
     });
 
+    it('fails validation when custom signing secret names are configured but missing, without leaking secrets', () => {
+      const config = createTestConfig({
+        signing: {
+          ...createTestConfig().signing,
+          android: {
+            ...createTestConfig().signing.android,
+            keystoreSecretName: 'SEC_CUSTOM_KEYSTORE_B64',
+            keystorePasswordSecretName: 'SEC_CUSTOM_KEYSTORE_PWD',
+            keyAliasSecretName: 'SEC_CUSTOM_KEY_ALIAS',
+            keyPasswordSecretName: 'SEC_CUSTOM_KEY_PWD',
+          },
+        },
+      });
+
+      const res = validateAndroidSigning(config, {});
+      expect(res.valid).toBe(false);
+      expect(res.missingVars).toContain('SEC_CUSTOM_KEYSTORE_B64 (or ANDROID_KEYSTORE_PATH)');
+      expect(res.missingVars).toContain('SEC_CUSTOM_KEYSTORE_PWD');
+      expect(res.missingVars).toContain('SEC_CUSTOM_KEY_ALIAS');
+      expect(res.missingVars).toContain('SEC_CUSTOM_KEY_PWD');
+      expect(res.errors[0]).toContain('SEC_CUSTOM_KEYSTORE_B64');
+
+      // Verify that when secrets are present, they are registered for redaction and never leaked
+      const sensitivePassword = 'P@ssw0rd!SuperSecret';
+      const validKeystoreB64 = Buffer.from('FAKE_VALID_KEYSTORE_BYTES').toString('base64');
+      const partialRes = validateAndroidSigning(config, {
+        SEC_CUSTOM_KEYSTORE_B64: validKeystoreB64,
+        SEC_CUSTOM_KEYSTORE_PWD: sensitivePassword,
+      });
+      expect(partialRes.valid).toBe(false);
+      expect(partialRes.missingVars).toContain('SEC_CUSTOM_KEY_ALIAS');
+      expect(partialRes.missingVars).toContain('SEC_CUSTOM_KEY_PWD');
+
+      // Check log masking
+      const message = `Validation trace with ${sensitivePassword} and keystore ${validKeystoreB64}`;
+      const masked = maskSecrets(message);
+      expect(masked).not.toContain(sensitivePassword);
+      expect(masked).not.toContain(validKeystoreB64);
+      expect(masked).toContain('[REDACTED]');
+    });
+
     it('provisions a temporary keystore file with 0600 permissions and cleans it up', async () => {
       const config = createTestConfig();
       const fakeKeystoreBytes = Buffer.from('FAKE_JKS_KEYSTORE_BINARY_PAYLOAD_1234567890');

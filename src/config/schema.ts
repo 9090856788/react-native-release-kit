@@ -242,6 +242,9 @@ export const AndroidSigningConfigSchema = z
 
 export const IOSSigningConfigSchema = z
   .object({
+    // Controls local signing configuration and validation helpers. Note: setting `enabled: false`
+    // does not disable the signing prerequisites of the generated release-tag workflow, which
+    // always produces a signed App Store IPA and requires distribution signing secrets.
     enabled: z.boolean().default(false),
     teamId: z.string().optional(),
     certificateSecretName: z.string().default('IOS_DISTRIBUTION_CERTIFICATE_BASE64'),

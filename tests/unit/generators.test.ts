@@ -442,9 +442,141 @@ describe('GitHub Actions Workflow Generators', () => {
       expect(yaml).toContain('KEYSTORE_PASSWORD: ${{ secrets.CUSTOM_KEYSTORE_PWD }}');
       expect(yaml).toContain('KEY_ALIAS: ${{ secrets.CUSTOM_ALIAS }}');
       expect(yaml).toContain('KEY_PASSWORD: ${{ secrets.CUSTOM_ALIAS_PWD }}');
+      expect(yaml).toContain("Required secret 'CUSTOM_KEYSTORE' is missing.");
+      expect(yaml).toContain("Required secret 'CUSTOM_KEYSTORE_PWD' is missing.");
+      expect(yaml).toContain("Required secret 'CUSTOM_ALIAS' is missing.");
+      expect(yaml).toContain("Required secret 'CUSTOM_ALIAS_PWD' is missing.");
+      expect(yaml).toContain(
+        "Required secret 'GOOGLE_PLAY_SERVICE_ACCOUNT_JSON' is missing for Google Play publishing.",
+      );
       expect(yaml).toContain('Provision Android Signing Keystore');
+      expect(yaml).toContain(
+        "Android release keystore is empty or could not be decoded from 'CUSTOM_KEYSTORE'.",
+      );
       expect(yaml).not.toContain('Android Release Signing Notice');
       expect(yaml).toContain('Cleanup Signing Keystore');
+    });
+
+    it('provisions Android keystore with custom secret names and custom env variables when signing is enabled and storePublishing is false', () => {
+      const config = createMockConfig({
+        android: {
+          ...getBaseConfig().android,
+          enabled: true,
+          buildArtifact: 'aab',
+        },
+        githubActions: {
+          ...getBaseConfig().githubActions,
+          storePublishing: false,
+        },
+        signing: {
+          ...getBaseConfig().signing,
+          android: {
+            enabled: true,
+            keystoreSecretName: 'CUSTOM_KEYSTORE_B64',
+            keystorePasswordSecretName: 'CUSTOM_KEYSTORE_PASS',
+            keyAliasSecretName: 'CUSTOM_KEY_ALIAS',
+            keyPasswordSecretName: 'CUSTOM_KEY_PASS',
+            keystorePathEnvName: 'CUSTOM_KEYSTORE_PATH',
+          },
+        },
+      });
+      const project = createMockProject();
+
+      const yaml = generateReleaseTagWorkflow(config, project);
+      const validation = validateWorkflowYaml(yaml);
+
+      expect(validation.valid).toBe(true);
+      expect(yaml).toContain('Provision Android Signing Keystore');
+      expect(yaml).toContain('KEYSTORE_BASE64: ${{ secrets.CUSTOM_KEYSTORE_B64 }}');
+      expect(yaml).toContain("Required signing secret 'CUSTOM_KEYSTORE_B64' is not set.");
+      expect(yaml).toContain(
+        "Android release keystore is empty or could not be decoded from 'CUSTOM_KEYSTORE_B64'.",
+      );
+      expect(yaml).toContain('CUSTOM_KEYSTORE_PATH: ${{ runner.temp }}/release.keystore');
+      expect(yaml).toContain('CUSTOM_KEYSTORE_PASS: ${{ secrets.CUSTOM_KEYSTORE_PASS }}');
+      expect(yaml).toContain('CUSTOM_KEY_ALIAS: ${{ secrets.CUSTOM_KEY_ALIAS }}');
+      expect(yaml).toContain('CUSTOM_KEY_PASS: ${{ secrets.CUSTOM_KEY_PASS }}');
+      expect(yaml).toContain(
+        'ORG_GRADLE_PROJECT_MYAPP_UPLOAD_STORE_PASSWORD: ${{ secrets.CUSTOM_KEYSTORE_PASS }}',
+      );
+      expect(yaml).toContain('Cleanup Signing Keystore');
+      expect(yaml).toContain('rm -f "$RUNNER_TEMP/release.keystore"');
+
+      // Store publishing is disabled: no store credentials validation or deployment steps
+      expect(yaml).not.toContain('Validate Store Credentials');
+      expect(yaml).not.toContain('Setup Ruby for Fastlane');
+      expect(yaml).not.toContain('Publish to Google Play');
+    });
+
+    it('enables Google Play publishing and credential validation when android.publishStore is true even if githubActions.storePublishing is false', () => {
+      const config = createMockConfig({
+        android: {
+          ...getBaseConfig().android,
+          enabled: true,
+          buildArtifact: 'aab',
+          publishStore: true,
+          deploymentTrack: 'internal',
+        },
+        githubActions: {
+          ...getBaseConfig().githubActions,
+          storePublishing: false,
+        },
+        signing: {
+          ...getBaseConfig().signing,
+          android: {
+            serviceAccountSecretName: 'CUSTOM_PLAY_SA_JSON',
+          },
+        },
+      });
+      const project = createMockProject();
+
+      const yaml = generateReleaseTagWorkflow(config, project);
+      const validation = validateWorkflowYaml(yaml);
+
+      expect(validation.valid).toBe(true);
+      expect(yaml).toContain('Provision Android Signing Keystore');
+      expect(yaml).toContain('Validate Store Credentials');
+      expect(yaml).toContain('PLAY_SERVICE_ACCOUNT_JSON: ${{ secrets.CUSTOM_PLAY_SA_JSON }}');
+      expect(yaml).toContain(
+        "Required secret 'CUSTOM_PLAY_SA_JSON' is missing for Google Play publishing.",
+      );
+      expect(yaml).toContain('Setup Ruby for Fastlane');
+      expect(yaml).toContain('Publish to Google Play (internal)');
+      expect(yaml).toContain('fastlane supply --aab "$ARTIFACT_FILE"');
+      expect(yaml).toContain('Cleanup Google Play Credentials');
+    });
+
+    it('resolves Gradle task and artifact path accurately for custom appModule and product flavor', () => {
+      const config = createMockConfig({
+        android: {
+          ...getBaseConfig().android,
+          enabled: true,
+          appModule: 'clientApp',
+          flavor: 'staging',
+          buildArtifact: 'aab',
+          packagePath: 'android',
+        },
+      });
+      const project = createMockProject({
+        android: {
+          hasAndroid: true,
+          packagePath: 'android',
+          appModule: 'clientApp',
+          isKotlinDsl: false,
+          buildGradleFound: true,
+          hasReleaseSigningConfig: true,
+          usesDebugSigningInRelease: false,
+          hasSigningConfigEnv: true,
+        },
+      });
+
+      const yaml = generateReleaseTagWorkflow(config, project);
+      const validation = validateWorkflowYaml(yaml);
+
+      expect(validation.valid).toBe(true);
+      expect(yaml).toContain('cd android');
+      expect(yaml).toContain('./gradlew :clientApp:bundleStagingRelease');
+      expect(yaml).toContain('path: android/clientApp/build/outputs/bundle/stagingRelease/*.aab');
     });
 
     it('omits signing notice and provisions keystore when signing.android.enabled is true and storePublishing is false', () => {
@@ -1360,11 +1492,125 @@ describe('GitHub Actions Workflow Generators', () => {
         expect(releaseYaml).toContain(
           '~/Library/MobileDevice/Provisioning\\ Profiles/embedded.mobileprovision',
         );
+        expect(releaseYaml).toContain('Missing required secret: CUSTOM_IOS_CERT');
+        expect(releaseYaml).toContain('Missing required secret: CUSTOM_IOS_PWD');
+        expect(releaseYaml).toContain('Missing required secret: CUSTOM_IOS_PROFILE');
+        expect(releaseYaml).toContain(
+          'App Store Connect API credentials are a separate requirement used only for automated TestFlight publishing.',
+        );
         expect(releaseYaml).toContain('Prepare Export Options Plist');
         expect(releaseYaml).toContain('EFFECTIVE_TEAM_ID="TEAM123456"');
         expect(releaseYaml).toContain('<key>teamID</key>');
         expect(releaseYaml).toContain('Cleanup iOS Signing Keychain');
         expect(releaseYaml).toContain('security delete-keychain "$RUNNER_TEMP/build.keychain"');
+      });
+
+      it('requires iOS signing credentials in release-tag workflow even when signing.ios.enabled is false, and omits App Store Connect credentials when TestFlight publishing is disabled', () => {
+        const config = createMockConfig({
+          ios: {
+            ...getBaseConfig().ios,
+            enabled: true,
+            uploadToTestFlight: false,
+          },
+          githubActions: {
+            ...getBaseConfig().githubActions,
+            storePublishing: false,
+          },
+          signing: {
+            ...getBaseConfig().signing,
+            ios: {
+              ...getBaseConfig().signing.ios,
+              enabled: false,
+            },
+          },
+        });
+        const project = createMockProject({
+          ios: {
+            hasIOS: true,
+            hasPodfile: true,
+            workspace: 'ios/TestApp.xcworkspace',
+            schemes: ['TestApp'],
+          },
+        });
+
+        const releaseYaml = generateReleaseTagWorkflow(config, project);
+        // Signing prerequisites are still required for signed App Store IPA export
+        expect(releaseYaml).toContain('Validate iOS Release Signing Prerequisites');
+        expect(releaseYaml).toContain(
+          'CERT_B64: ${{ secrets.IOS_DISTRIBUTION_CERTIFICATE_BASE64 }}',
+        );
+        expect(releaseYaml).toContain('CERT_PWD: ${{ secrets.IOS_CERTIFICATE_PASSWORD }}');
+        expect(releaseYaml).toContain(
+          'PROFILE_B64: ${{ secrets.IOS_PROVISIONING_PROFILE_BASE64 }}',
+        );
+        expect(releaseYaml).toContain(
+          'Missing required secret: IOS_DISTRIBUTION_CERTIFICATE_BASE64',
+        );
+        expect(releaseYaml).toContain('Missing required secret: IOS_CERTIFICATE_PASSWORD');
+        expect(releaseYaml).toContain('Missing required secret: IOS_PROVISIONING_PROFILE_BASE64');
+        expect(releaseYaml).toContain('Provision iOS Distribution Certificate & Profile');
+        expect(releaseYaml).toContain("-destination 'generic/platform=iOS'");
+        expect(releaseYaml).toContain('-archivePath "$RUNNER_TEMP/build/TestApp.xcarchive"');
+        expect(releaseYaml).toContain('-exportArchive');
+
+        // TestFlight publishing is disabled: App Store Connect API credentials are not required
+        expect(releaseYaml).not.toContain('Validate App Store Connect Credentials');
+        expect(releaseYaml).not.toContain('APP_STORE_CONNECT_API_KEY_KEY_CONTENT');
+        expect(releaseYaml).not.toContain('pilot upload');
+      });
+
+      it('enforces App Store Connect credential validation and pilot upload when storePublishing is enabled', () => {
+        const config = createMockConfig({
+          ios: {
+            ...getBaseConfig().ios,
+            enabled: true,
+            uploadToTestFlight: false,
+          },
+          githubActions: {
+            ...getBaseConfig().githubActions,
+            storePublishing: true,
+          },
+          signing: {
+            ...getBaseConfig().signing,
+            ios: {
+              ...getBaseConfig().signing.ios,
+              appStoreConnectKeyContentSecretName: 'CUSTOM_ASC_KEY',
+              appStoreConnectKeyIdSecretName: 'CUSTOM_ASC_KEY_ID',
+              appStoreConnectIssuerIdSecretName: 'CUSTOM_ASC_ISSUER_ID',
+            },
+          },
+        });
+        const project = createMockProject({
+          ios: {
+            hasIOS: true,
+            hasPodfile: true,
+            workspace: 'ios/TestApp.xcworkspace',
+            schemes: ['TestApp'],
+          },
+        });
+
+        const releaseYaml = generateReleaseTagWorkflow(config, project);
+        // Signing prerequisites remain
+        expect(releaseYaml).toContain('Validate iOS Release Signing Prerequisites');
+
+        // App Store Connect credentials validation step is included with custom secret names
+        expect(releaseYaml).toContain('Validate App Store Connect Credentials');
+        expect(releaseYaml).toContain('ASC_KEY_CONTENT: ${{ secrets.CUSTOM_ASC_KEY }}');
+        expect(releaseYaml).toContain('ASC_KEY_ID: ${{ secrets.CUSTOM_ASC_KEY_ID }}');
+        expect(releaseYaml).toContain('ASC_ISSUER_ID: ${{ secrets.CUSTOM_ASC_ISSUER_ID }}');
+        expect(releaseYaml).toContain(
+          "Required secret 'CUSTOM_ASC_KEY' is missing for TestFlight publishing.",
+        );
+        expect(releaseYaml).toContain(
+          "Required secret 'CUSTOM_ASC_KEY_ID' is missing for TestFlight publishing.",
+        );
+        expect(releaseYaml).toContain(
+          "Required secret 'CUSTOM_ASC_ISSUER_ID' is missing for TestFlight publishing.",
+        );
+
+        // Fastlane pilot upload step is included
+        expect(releaseYaml).toContain('Publish to Apple TestFlight');
+        expect(releaseYaml).toContain('pilot upload --ipa "$ARTIFACT_FILE"');
       });
 
       it('handles Fastlane Gemfile detection and Pilot upload correctly in release workflow', () => {

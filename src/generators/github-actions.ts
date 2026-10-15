@@ -498,6 +498,10 @@ export function generateReleaseTagWorkflow(
             exit 1
           fi
           echo "$KEYSTORE_BASE64" | tr -d '\\n\\r ' | base64 --decode > "$RUNNER_TEMP/release.keystore"
+          if [ ! -s "$RUNNER_TEMP/release.keystore" ]; then
+            echo "::error::Android release keystore is empty or could not be decoded from '${config.signing.android.keystoreSecretName}'."
+            exit 1
+          fi
           chmod 600 "$RUNNER_TEMP/release.keystore"
 
 `;
@@ -577,12 +581,28 @@ export function generateReleaseTagWorkflow(
           KEY_PASSWORD: \${{ secrets.${config.signing.android.keyPasswordSecretName} }}
           PLAY_SERVICE_ACCOUNT_JSON: \${{ secrets.${saSecret} }}
         run: |
+          MISSING=0
           if [ -z "$KEYSTORE_BASE64" ]; then
             echo "::error::Required secret '${config.signing.android.keystoreSecretName}' is missing."
-            exit 1
+            MISSING=1
+          fi
+          if [ -z "$KEYSTORE_PASSWORD" ]; then
+            echo "::error::Required secret '${config.signing.android.keystorePasswordSecretName}' is missing."
+            MISSING=1
+          fi
+          if [ -z "$KEY_ALIAS" ]; then
+            echo "::error::Required secret '${config.signing.android.keyAliasSecretName}' is missing."
+            MISSING=1
+          fi
+          if [ -z "$KEY_PASSWORD" ]; then
+            echo "::error::Required secret '${config.signing.android.keyPasswordSecretName}' is missing."
+            MISSING=1
           fi
           if [ -z "$PLAY_SERVICE_ACCOUNT_JSON" ]; then
             echo "::error::Required secret '${saSecret}' is missing for Google Play publishing."
+            MISSING=1
+          fi
+          if [ "$MISSING" -eq 1 ]; then
             exit 1
           fi
           echo "Store credentials verified successfully."
@@ -672,13 +692,26 @@ ${buildEnvBlock}        run: |
           CERT_PWD: \${{ secrets.${certPwdSecret} }}
           PROFILE_B64: \${{ secrets.${profileSecret} }}
         run: |
-          if [ -z "$CERT_B64" ] || [ -z "$PROFILE_B64" ]; then
-            echo "::error::iOS release signing prerequisites are not configured. A clean macOS runner cannot sign or export an IPA without signing credentials."
+          MISSING_SECRETS=""
+          if [ -z "$CERT_B64" ]; then
+            echo "::error::Missing required secret: ${certSecret} (Apple Distribution .p12 certificate encoded in base64)."
+            MISSING_SECRETS="true"
+          fi
+          if [ -z "$CERT_PWD" ]; then
+            echo "::error::Missing required secret: ${certPwdSecret} (password for the .p12 certificate)."
+            MISSING_SECRETS="true"
+          fi
+          if [ -z "$PROFILE_B64" ]; then
+            echo "::error::Missing required secret: ${profileSecret} (App Store provisioning profile encoded in base64)."
+            MISSING_SECRETS="true"
+          fi
+          if [ -n "$MISSING_SECRETS" ]; then
+            echo "::error::iOS release signing prerequisites are not configured. A clean macOS runner cannot sign or export an App Store IPA without signing credentials."
             echo "::notice::Configure the following distribution signing secrets in your GitHub repository:"
             echo "    - ${certSecret}: Base64-encoded .p12 distribution certificate"
             echo "    - ${certPwdSecret}: Password for the .p12 certificate"
             echo "    - ${profileSecret}: Base64-encoded .mobileprovision profile"
-            echo "::warning::App Store Connect API credentials alone cannot sign or export an IPA on a clean macOS runner without an installed distribution certificate and provisioning profile."
+            echo "::warning::App Store Connect API credentials alone cannot sign or export an IPA on a clean macOS runner without an installed distribution certificate and provisioning profile. App Store Connect API credentials are a separate requirement used only for automated TestFlight publishing."
             exit 1
           fi
           echo "iOS release signing prerequisites verified successfully."
@@ -689,7 +722,7 @@ ${buildEnvBlock}        run: |
           CERT_PWD: \${{ secrets.${certPwdSecret} }}
           PROFILE_B64: \${{ secrets.${profileSecret} }}
         run: |
-          if [ -n "$CERT_B64" ] && [ -n "$PROFILE_B64" ]; then
+          if [ -n "$CERT_B64" ] && [ -n "$CERT_PWD" ] && [ -n "$PROFILE_B64" ]; then
             KEYCHAIN_PATH="$RUNNER_TEMP/build.keychain"
             KEYCHAIN_PWD=\$(openssl rand -base64 12)
             security create-keychain -p "$KEYCHAIN_PWD" "$KEYCHAIN_PATH"

@@ -262,7 +262,9 @@ npx react-native-release-kit setup --force
 3. **Release Tag Deployment** (`.github/workflows/release-tag.yml`):
    - Triggers on tags matching `releaseTagPattern` (e.g. `v*`) and manual `workflow_dispatch`.
    - Preflights and provisions Android release signing keystore and iOS distribution certificates into temporary keychains.
-   - Builds Android release App Bundle (`bundleRelease`) and iOS IPA artifact (`xcodebuild archive` + `exportArchive`).
+   - Builds Android release App Bundle (`bundleRelease`) and a signed iOS App Store IPA artifact (`xcodebuild archive` + `exportArchive`).
+   - Requires three distribution signing secrets (`IOS_DISTRIBUTION_CERTIFICATE_BASE64`, `IOS_CERTIFICATE_PASSWORD`, `IOS_PROVISIONING_PROFILE_BASE64`) to build and export the signed IPA on clean macOS runners. These signing requirements apply even when `signing.ios.enabled` is `false` and TestFlight publishing is disabled.
+   - **Signing and publishing are separate operations**: App Store Connect API credentials (`APP_STORE_CONNECT_API_KEY_KEY_CONTENT`, etc.) are required only for automated TestFlight publishing, not merely to generate and archive the signed IPA.
    - Uploads to Google Play tracks and Apple TestFlight when `githubActions.storePublishing` is enabled.
    - Cleans up temporary keystores and keychains in `if: always()` steps.
 
@@ -444,14 +446,22 @@ Configure these repository secrets in **GitHub -> Settings -> Secrets and variab
 | `GOOGLE_PLAY_SERVICE_ACCOUNT_JSON` | Google Play Store Publishing | Raw or base64-encoded Google Cloud Service Account JSON key |
 
 ### iOS Secrets
+
+The generated iOS release-tag workflow produces a **signed App Store IPA**. To export a signed IPA on a clean macOS CI runner, Apple codesigning requires an installed distribution certificate and a matching provisioning profile.
+
+> [!IMPORTANT]
+> **Signing vs. Publishing Requirements**:
+> - **Signing Secrets (Required for IPA generation)**: `IOS_DISTRIBUTION_CERTIFICATE_BASE64`, `IOS_CERTIFICATE_PASSWORD`, and `IOS_PROVISIONING_PROFILE_BASE64` are required to compile, sign, and export the release IPA. These prerequisites apply even when `signing.ios.enabled` is `false` and TestFlight publishing is disabled.
+> - **Publishing Secrets (Required only for TestFlight)**: App Store Connect API credentials (`APP_STORE_CONNECT_API_KEY_*`) are used exclusively for automated store uploads via Fastlane and are **not** required merely to generate and archive the signed IPA.
+
 | Secret Name | Required For | Description |
 |---|---|---|
-| `IOS_DISTRIBUTION_CERTIFICATE_BASE64` | iOS Release Archive & IPA Export | Base64-encoded `.p12` distribution certificate |
-| `IOS_CERTIFICATE_PASSWORD` | iOS Release Archive & IPA Export | Password for the `.p12` certificate |
-| `IOS_PROVISIONING_PROFILE_BASE64` | iOS Release Archive & IPA Export | Base64-encoded `.mobileprovision` distribution profile |
-| `APP_STORE_CONNECT_API_KEY_KEY_CONTENT` | TestFlight Store Publishing | `.p8` API key content (raw PEM or base64) |
-| `APP_STORE_CONNECT_API_KEY_KEY_ID` | TestFlight Store Publishing | 10-character App Store Connect Key ID |
-| `APP_STORE_CONNECT_API_KEY_ISSUER_ID` | TestFlight Store Publishing | App Store Connect Issuer UUID |
+| `IOS_DISTRIBUTION_CERTIFICATE_BASE64` | Signed App Store IPA Export (Always in Release Workflow) | Base64-encoded `.p12` Apple Distribution certificate |
+| `IOS_CERTIFICATE_PASSWORD` | Signed App Store IPA Export (Always in Release Workflow) | Password for the `.p12` certificate |
+| `IOS_PROVISIONING_PROFILE_BASE64` | Signed App Store IPA Export (Always in Release Workflow) | Base64-encoded `.mobileprovision` App Store distribution profile |
+| `APP_STORE_CONNECT_API_KEY_KEY_CONTENT` | TestFlight Store Publishing Only | `.p8` API key content (raw PEM or base64) |
+| `APP_STORE_CONNECT_API_KEY_KEY_ID` | TestFlight Store Publishing Only | 10-character App Store Connect Key ID |
+| `APP_STORE_CONNECT_API_KEY_ISSUER_ID` | TestFlight Store Publishing Only | App Store Connect Issuer UUID |
 | `IOS_TEAM_ID` (or `APPLE_TEAM_ID`) | Optional Team ID Override | 10-character Apple Developer Team ID |
 
 ---
