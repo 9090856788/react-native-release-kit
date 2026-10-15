@@ -1,3 +1,7 @@
+import fs from 'node:fs';
+import path from 'node:path';
+import os from 'node:os';
+import { execSync } from 'node:child_process';
 import { describe, it, expect } from 'vitest';
 import {
   generatePrValidationWorkflow,
@@ -1490,8 +1494,24 @@ describe('GitHub Actions Workflow Generators', () => {
         );
         expect(releaseYaml).toContain('security import "$RUNNER_TEMP/cert.p12"');
         expect(releaseYaml).toContain(
-          '~/Library/MobileDevice/Provisioning\\ Profiles/embedded.mobileprovision',
+          'PROFILES_DIR="$HOME/Library/MobileDevice/Provisioning Profiles"',
         );
+        expect(releaseYaml).toContain('TEMP_PROFILE="$RUNNER_TEMP/profile.mobileprovision"');
+        expect(releaseYaml).toContain('plutil -extract UUID raw -');
+        expect(releaseYaml).toContain(
+          'PROFILE_FILENAME="${PROFILE_UUID}-${{ github.run_id }}-${{ github.run_attempt }}.mobileprovision"',
+        );
+        expect(releaseYaml).toContain('PROFILE_PATH="$PROFILES_DIR/$PROFILE_FILENAME"');
+        expect(releaseYaml).toContain(
+          '( set -o noclobber; cat "$TEMP_PROFILE" > "$PROFILE_PATH" ) 2>/dev/null',
+        );
+        expect(releaseYaml).toContain(
+          'echo "$PROFILE_PATH" > "$RUNNER_TEMP/provisioning_profile_path"',
+        );
+        expect(releaseYaml).toContain(
+          'echo "::error::Failed to exclusively create provisioning profile at $PROFILE_PATH."',
+        );
+        expect(releaseYaml).not.toContain('cp -n "$TEMP_PROFILE" "$PROFILE_PATH" || true');
         expect(releaseYaml).toContain('Missing required secret: CUSTOM_IOS_CERT');
         expect(releaseYaml).toContain('Missing required secret: CUSTOM_IOS_PWD');
         expect(releaseYaml).toContain('Missing required secret: CUSTOM_IOS_PROFILE');
@@ -1503,6 +1523,21 @@ describe('GitHub Actions Workflow Generators', () => {
         expect(releaseYaml).toContain('<key>teamID</key>');
         expect(releaseYaml).toContain('Cleanup iOS Signing Keychain');
         expect(releaseYaml).toContain('security delete-keychain "$RUNNER_TEMP/build.keychain"');
+        expect(releaseYaml).toContain(
+          'INSTALLED_PROFILE=$(cat "$RUNNER_TEMP/provisioning_profile_path")',
+        );
+        expect(releaseYaml).toContain('[ "$(dirname "$INSTALLED_PROFILE")" = "$PROFILES_DIR" ]');
+        expect(releaseYaml).toContain('PROFILE_FILENAME=$(basename "$INSTALLED_PROFILE")');
+        expect(releaseYaml).toContain(
+          'ALLOWED_PATTERN="^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}|profile)-${{ github.run_id }}-${{ github.run_attempt }}\\.mobileprovision$"',
+        );
+        expect(releaseYaml).toContain('if [[ "$PROFILE_FILENAME" =~ $ALLOWED_PATTERN ]]; then');
+        expect(releaseYaml).not.toContain('=\\~');
+        expect(releaseYaml).not.toContain('\\~');
+        expect(releaseYaml).not.toContain('*-${{ github.run_id }}');
+        expect(releaseYaml).toContain('rm -f "$INSTALLED_PROFILE" 2>/dev/null || true');
+        expect(releaseYaml).not.toContain('embedded.mobileprovision');
+        expect(releaseYaml).not.toContain('~/Library/MobileDevice');
       });
 
       it('requires iOS signing credentials in release-tag workflow even when signing.ios.enabled is false, and omits App Store Connect credentials when TestFlight publishing is disabled', () => {
@@ -1706,6 +1741,358 @@ describe('GitHub Actions Workflow Generators', () => {
         expect(releaseYaml).not.toContain('iphonesimulator');
         expect(releaseYaml).toContain('archive');
         expect(releaseYaml).toContain('exportArchive');
+      });
+
+      it('installs provisioning profile with unique filename under $HOME and cleans up only the installed profile', () => {
+        const config = createMockConfig({
+          ios: {
+            ...getBaseConfig().ios,
+            enabled: true,
+          },
+        });
+        const project = createMockProject({
+          ios: {
+            hasIOS: true,
+            hasPodfile: true,
+            workspace: 'ios/TestApp.xcworkspace',
+            schemes: ['TestApp'],
+          },
+        });
+
+        const releaseYaml = generateReleaseTagWorkflow(config, project);
+
+        // Verification of $HOME based path without escaped tildes
+        expect(releaseYaml).toContain(
+          'PROFILES_DIR="$HOME/Library/MobileDevice/Provisioning Profiles"',
+        );
+        expect(releaseYaml).toContain('mkdir -p "$PROFILES_DIR"');
+        expect(releaseYaml).not.toContain('~/Library/MobileDevice');
+
+        // Verification of unique profile extraction, exclusive creation, path recording order, and clear failure
+        expect(releaseYaml).toContain('TEMP_PROFILE="$RUNNER_TEMP/profile.mobileprovision"');
+        expect(releaseYaml).toContain('plutil -extract UUID raw -');
+        expect(releaseYaml).toContain(
+          'PROFILE_FILENAME="${PROFILE_UUID}-${{ github.run_id }}-${{ github.run_attempt }}.mobileprovision"',
+        );
+        expect(releaseYaml).toContain(
+          'PROFILE_FILENAME="profile-${{ github.run_id }}-${{ github.run_attempt }}.mobileprovision"',
+        );
+        expect(releaseYaml).toContain('PROFILE_PATH="$PROFILES_DIR/$PROFILE_FILENAME"');
+        expect(releaseYaml).toContain(
+          '( set -o noclobber; cat "$TEMP_PROFILE" > "$PROFILE_PATH" ) 2>/dev/null',
+        );
+        expect(releaseYaml).toContain(
+          'echo "::error::Failed to exclusively create provisioning profile at $PROFILE_PATH."',
+        );
+        expect(releaseYaml).not.toContain('cp -n');
+
+        // Verify path recording happens immediately after creation and before chmod
+        const createIndex = releaseYaml.indexOf(
+          '( set -o noclobber; cat "$TEMP_PROFILE" > "$PROFILE_PATH" )',
+        );
+        const recordIndex = releaseYaml.indexOf(
+          'echo "$PROFILE_PATH" > "$RUNNER_TEMP/provisioning_profile_path"',
+        );
+        const chmodIndex = releaseYaml.indexOf('chmod 600 "$PROFILE_PATH"');
+        expect(createIndex).toBeGreaterThan(-1);
+        expect(recordIndex).toBeGreaterThan(createIndex);
+        expect(chmodIndex).toBeGreaterThan(recordIndex);
+        expect(releaseYaml).toContain('rm -f "$TEMP_PROFILE"');
+
+        // Verification that generic embedded.mobileprovision is never used
+        expect(releaseYaml).not.toContain('embedded.mobileprovision');
+
+        // Verification of cleanup directory containment check and safe removal
+        expect(releaseYaml).toContain('Cleanup iOS Signing Keychain');
+        expect(releaseYaml).toContain('if [ -f "$RUNNER_TEMP/provisioning_profile_path" ]; then');
+        expect(releaseYaml).toContain(
+          'INSTALLED_PROFILE=$(cat "$RUNNER_TEMP/provisioning_profile_path")',
+        );
+        expect(releaseYaml).toContain(
+          'if [ -n "$INSTALLED_PROFILE" ] && [ "$(dirname "$INSTALLED_PROFILE")" = "$PROFILES_DIR" ]; then',
+        );
+        expect(releaseYaml).toContain('PROFILE_FILENAME=$(basename "$INSTALLED_PROFILE")');
+        expect(releaseYaml).toContain(
+          'ALLOWED_PATTERN="^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}|profile)-${{ github.run_id }}-${{ github.run_attempt }}\\.mobileprovision$"',
+        );
+        expect(releaseYaml).toContain('if [[ "$PROFILE_FILENAME" =~ $ALLOWED_PATTERN ]]; then');
+        expect(releaseYaml).not.toContain('=\\~');
+        expect(releaseYaml).not.toContain('\\~');
+        expect(releaseYaml).not.toContain('*-${{ github.run_id }}');
+        expect(releaseYaml).toContain('rm -f "$INSTALLED_PROFILE" 2>/dev/null || true');
+        expect(releaseYaml).toContain(
+          'rm -f "$RUNNER_TEMP/provisioning_profile_path" 2>/dev/null || true',
+        );
+      });
+
+      it('validates cleanup pattern against allowed workflow naming patterns and rejects unexpected filenames', () => {
+        const config = createMockConfig({
+          ios: {
+            ...getBaseConfig().ios,
+            enabled: true,
+          },
+        });
+        const project = createMockProject({
+          ios: {
+            hasIOS: true,
+            hasPodfile: true,
+            workspace: 'ios/TestApp.xcworkspace',
+            schemes: ['TestApp'],
+          },
+        });
+
+        const releaseYaml = generateReleaseTagWorkflow(config, project);
+
+        // Verify generated workflow contains the allowed pattern checks
+        expect(releaseYaml).toContain('PROFILE_FILENAME=$(basename "$INSTALLED_PROFILE")');
+        expect(releaseYaml).toContain(
+          'ALLOWED_PATTERN="^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}|profile)-${{ github.run_id }}-${{ github.run_attempt }}\\.mobileprovision$"',
+        );
+        expect(releaseYaml).toContain('if [[ "$PROFILE_FILENAME" =~ $ALLOWED_PATTERN ]]; then');
+        expect(releaseYaml).not.toContain('*-${{ github.run_id }}');
+
+        // Extract the actual cleanup script directly from the generated workflow
+        const cleanupMatch = releaseYaml.match(
+          /- name: Cleanup iOS Signing Keychain[\s\S]*?run: \|\n([\s\S]*?)(?=\n\s{2,6}- name:|\n\s{0,4}[a-zA-Z0-9_-]+:|$)/,
+        );
+        expect(cleanupMatch).toBeTruthy();
+
+        const runId = '12345';
+        const runAttempt = '1';
+
+        // Substitute GitHub Actions expressions with mock run ID and attempt
+        const executableCleanupScript = cleanupMatch![1]
+          .replaceAll('${{ github.run_id }}', runId)
+          .replaceAll('${{ github.run_attempt }}', runAttempt);
+
+        const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'rn-cleanup-test-'));
+        const mockHome = path.join(tmpDir, 'home');
+        const mockRunnerTemp = path.join(tmpDir, 'runner_temp');
+        const mockProfilesDir = path.join(
+          mockHome,
+          'Library',
+          'MobileDevice',
+          'Provisioning Profiles',
+        );
+
+        fs.mkdirSync(mockProfilesDir, { recursive: true });
+        fs.mkdirSync(mockRunnerTemp, { recursive: true });
+
+        const runCleanupForTarget = (targetPath: string) => {
+          fs.writeFileSync(path.join(mockRunnerTemp, 'provisioning_profile_path'), targetPath);
+          execSync(executableCleanupScript, {
+            shell: '/bin/bash',
+            env: {
+              ...process.env,
+              HOME: mockHome,
+              RUNNER_TEMP: mockRunnerTemp,
+            },
+          });
+        };
+
+        try {
+          // 1. Valid UUID profile created by this run -> MUST be deleted
+          const validUuidProfile = path.join(
+            mockProfilesDir,
+            `c74d6c6e-1d5d-4f1e-8e6f-5e92c2bfa322-${runId}-${runAttempt}.mobileprovision`,
+          );
+          fs.writeFileSync(validUuidProfile, 'valid-uuid-content');
+          runCleanupForTarget(validUuidProfile);
+          expect(fs.existsSync(validUuidProfile)).toBe(false);
+          expect(fs.existsSync(path.join(mockRunnerTemp, 'provisioning_profile_path'))).toBe(false);
+
+          // Valid uppercase UUID profile created by this run -> MUST be deleted
+          const validUppercaseUuidProfile = path.join(
+            mockProfilesDir,
+            `C74D6C6E-1D5D-4F1E-8E6F-5E92C2BFA322-${runId}-${runAttempt}.mobileprovision`,
+          );
+          fs.writeFileSync(validUppercaseUuidProfile, 'valid-uppercase-content');
+          runCleanupForTarget(validUppercaseUuidProfile);
+          expect(fs.existsSync(validUppercaseUuidProfile)).toBe(false);
+          expect(fs.existsSync(path.join(mockRunnerTemp, 'provisioning_profile_path'))).toBe(false);
+
+          // 2. Valid fallback profile created by this run -> MUST be deleted
+          const validFallbackProfile = path.join(
+            mockProfilesDir,
+            `profile-${runId}-${runAttempt}.mobileprovision`,
+          );
+          fs.writeFileSync(validFallbackProfile, 'fallback-content');
+          runCleanupForTarget(validFallbackProfile);
+          expect(fs.existsSync(validFallbackProfile)).toBe(false);
+          expect(fs.existsSync(path.join(mockRunnerTemp, 'provisioning_profile_path'))).toBe(false);
+
+          // 3. Rejected: invalid UUID-like prefixes and unexpected filenames -> MUST NOT be deleted
+          const invalidPrefixes = [
+            `notauuid-${runId}-${runAttempt}.mobileprovision`,
+            `g74d6c6e-1d5d-4f1e-8e6f-5e92c2bfa322-${runId}-${runAttempt}.mobileprovision`, // non-hex 'g'
+            `c74d6c6e-1d5d-4f1e-8e6f-5e92c2bfa32-${runId}-${runAttempt}.mobileprovision`, // too short
+            `c74d6c6e-1d5d-4f1e-8e6f-5e92c2bfa3222-${runId}-${runAttempt}.mobileprovision`, // too long
+            'custom-profile.mobileprovision',
+            'random.txt',
+          ];
+          for (const invalidName of invalidPrefixes) {
+            const invalidProfile = path.join(mockProfilesDir, invalidName);
+            fs.writeFileSync(invalidProfile, 'invalid-prefix-content');
+            runCleanupForTarget(invalidProfile);
+            expect(fs.existsSync(invalidProfile)).toBe(true);
+          }
+
+          // 4. Rejected: standard UUID-only profile (not created with run_id suffix) -> MUST NOT be deleted
+          const standardUuidProfile = path.join(
+            mockProfilesDir,
+            'c74d6c6e-1d5d-4f1e-8e6f-5e92c2bfa322.mobileprovision',
+          );
+          fs.writeFileSync(standardUuidProfile, 'standard-uuid-content');
+          runCleanupForTarget(standardUuidProfile);
+          expect(fs.existsSync(standardUuidProfile)).toBe(true);
+
+          // 5. Rejected: profiles from another run or attempt -> MUST NOT be deleted
+          const otherRunProfiles = [
+            path.join(mockProfilesDir, `profile-99999-${runAttempt}.mobileprovision`),
+            path.join(mockProfilesDir, `profile-${runId}-2.mobileprovision`),
+            path.join(
+              mockProfilesDir,
+              `c74d6c6e-1d5d-4f1e-8e6f-5e92c2bfa322-99999-${runAttempt}.mobileprovision`,
+            ),
+          ];
+          for (const otherProfile of otherRunProfiles) {
+            fs.writeFileSync(otherProfile, 'other-run-content');
+            runCleanupForTarget(otherProfile);
+            expect(fs.existsSync(otherProfile)).toBe(true);
+          }
+
+          // 6. Rejected: embedded.mobileprovision -> MUST NOT be deleted
+          const embeddedProfile = path.join(mockProfilesDir, 'embedded.mobileprovision');
+          fs.writeFileSync(embeddedProfile, 'embedded-content');
+          runCleanupForTarget(embeddedProfile);
+          expect(fs.existsSync(embeddedProfile)).toBe(true);
+
+          // 7. Rejected: path outside $HOME/Library/MobileDevice/Provisioning Profiles -> MUST NOT be deleted
+          const outsideProfile = path.join(
+            tmpDir,
+            `profile-${runId}-${runAttempt}.mobileprovision`,
+          );
+          fs.writeFileSync(outsideProfile, 'outside-content');
+          runCleanupForTarget(outsideProfile);
+          expect(fs.existsSync(outsideProfile)).toBe(true);
+
+          // 8. Rejected: subdirectory inside $PROFILES_DIR -> MUST NOT be deleted
+          const subDir = path.join(mockProfilesDir, 'subdir');
+          fs.mkdirSync(subDir, { recursive: true });
+          const subDirProfile = path.join(subDir, `profile-${runId}-${runAttempt}.mobileprovision`);
+          fs.writeFileSync(subDirProfile, 'subdir-content');
+          runCleanupForTarget(subDirProfile);
+          expect(fs.existsSync(subDirProfile)).toBe(true);
+
+          // 9. Rejected: parent traversal path -> MUST NOT be deleted
+          const traversalPath = path.join(
+            mockProfilesDir,
+            `../profile-${runId}-${runAttempt}.mobileprovision`,
+          );
+          fs.writeFileSync(traversalPath, 'traversal-content');
+          runCleanupForTarget(traversalPath);
+          expect(fs.existsSync(traversalPath)).toBe(true);
+        } finally {
+          fs.rmSync(tmpDir, { recursive: true, force: true });
+        }
+      });
+
+      it('verifies the literal =~ operator in release-tag.yml', () => {
+        const config = createMockConfig({
+          ios: {
+            ...getBaseConfig().ios,
+            enabled: true,
+          },
+        });
+        const project = createMockProject({
+          ios: {
+            hasIOS: true,
+            hasPodfile: true,
+            workspace: 'ios/TestApp.xcworkspace',
+            schemes: ['TestApp'],
+          },
+        });
+
+        const releaseYaml = generateReleaseTagWorkflow(config, project);
+        // Find the line containing the regex conditional check
+        const matchingLine = releaseYaml
+          .split('\n')
+          .find((line) => line.includes('PROFILE_FILENAME') && line.includes('ALLOWED_PATTERN'));
+
+        expect(matchingLine).toBeDefined();
+        // Explicitly assert the exact literal line without leading whitespace
+        expect(matchingLine?.trim()).toBe('if [[ "$PROFILE_FILENAME" =~ $ALLOWED_PATTERN ]]; then');
+        // Explicitly assert that no escaped-tilde variants exist anywhere in the workflow
+        expect(releaseYaml).not.toContain('=\\~');
+        expect(releaseYaml).not.toContain('\\~');
+        expect(releaseYaml).not.toMatch(/=\\\s*~/);
+      });
+
+      it('correctly handles configured team ID and prevents fallback override in release-tag workflow', () => {
+        const config = createMockConfig({
+          ios: {
+            ...getBaseConfig().ios,
+            enabled: true,
+            teamId: 'CONFIGURED_TEAM_123',
+          },
+        });
+        const project = createMockProject({
+          ios: {
+            hasIOS: true,
+            hasPodfile: true,
+            workspace: 'ios/TestApp.xcworkspace',
+            schemes: ['TestApp'],
+          },
+        });
+
+        const releaseYaml = generateReleaseTagWorkflow(config, project);
+        expect(releaseYaml).toContain('Prepare Export Options Plist');
+        expect(releaseYaml).toContain(
+          'TEAM_ID: ${{ secrets.IOS_TEAM_ID || secrets.APPLE_TEAM_ID }}',
+        );
+        expect(releaseYaml).toContain('EFFECTIVE_TEAM_ID="CONFIGURED_TEAM_123"');
+        expect(releaseYaml).toContain('if [ -z "$EFFECTIVE_TEAM_ID" ] && [ -n "$TEAM_ID" ]; then');
+        expect(releaseYaml).toContain('EFFECTIVE_TEAM_ID="$TEAM_ID"');
+        expect(releaseYaml).toContain('if [ -n "$EFFECTIVE_TEAM_ID" ]; then');
+        expect(releaseYaml).toContain('<key>teamID</key>');
+        expect(releaseYaml).toContain('<string>$EFFECTIVE_TEAM_ID</string>');
+      });
+
+      it('correctly handles unconfigured team ID with GitHub secret fallback in release-tag workflow', () => {
+        const config = createMockConfig({
+          ios: {
+            ...getBaseConfig().ios,
+            enabled: true,
+            teamId: undefined,
+          },
+          signing: {
+            ...getBaseConfig().signing,
+            ios: {
+              ...getBaseConfig().signing.ios,
+              teamId: undefined,
+            },
+          },
+        });
+        const project = createMockProject({
+          ios: {
+            hasIOS: true,
+            hasPodfile: true,
+            workspace: 'ios/TestApp.xcworkspace',
+            schemes: ['TestApp'],
+          },
+        });
+
+        const releaseYaml = generateReleaseTagWorkflow(config, project);
+        expect(releaseYaml).toContain('Prepare Export Options Plist');
+        expect(releaseYaml).toContain(
+          'TEAM_ID: ${{ secrets.IOS_TEAM_ID || secrets.APPLE_TEAM_ID }}',
+        );
+        expect(releaseYaml).toContain('EFFECTIVE_TEAM_ID=""');
+        expect(releaseYaml).toContain('if [ -z "$EFFECTIVE_TEAM_ID" ] && [ -n "$TEAM_ID" ]; then');
+        expect(releaseYaml).toContain('EFFECTIVE_TEAM_ID="$TEAM_ID"');
+        expect(releaseYaml).toContain('if [ -n "$EFFECTIVE_TEAM_ID" ]; then');
+        expect(releaseYaml).toContain('<key>teamID</key>');
+        expect(releaseYaml).toContain('<string>$EFFECTIVE_TEAM_ID</string>');
       });
     });
   });

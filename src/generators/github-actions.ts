@@ -733,9 +733,26 @@ ${buildEnvBlock}        run: |
             security import "$RUNNER_TEMP/cert.p12" -k "$KEYCHAIN_PATH" -P "$CERT_PWD" -T /usr/bin/codesign -T /usr/bin/security
             rm -f "$RUNNER_TEMP/cert.p12"
             security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PWD" "$KEYCHAIN_PATH"
-            mkdir -p ~/Library/MobileDevice/Provisioning\\ Profiles
-            echo "$PROFILE_B64" | tr -d '\\n\\r ' | base64 --decode > ~/Library/MobileDevice/Provisioning\\ Profiles/embedded.mobileprovision
-            chmod 600 ~/Library/MobileDevice/Provisioning\\ Profiles/embedded.mobileprovision
+            PROFILES_DIR="$HOME/Library/MobileDevice/Provisioning Profiles"
+            mkdir -p "$PROFILES_DIR"
+            TEMP_PROFILE="$RUNNER_TEMP/profile.mobileprovision"
+            echo "$PROFILE_B64" | tr -d '\\n\\r ' | base64 --decode > "$TEMP_PROFILE"
+            PROFILE_UUID=\$(security cms -D -i "$TEMP_PROFILE" 2>/dev/null | plutil -extract UUID raw - 2>/dev/null || true)
+            if [ -n "\$PROFILE_UUID" ]; then
+              PROFILE_FILENAME="\${PROFILE_UUID}-\${{ github.run_id }}-\${{ github.run_attempt }}.mobileprovision"
+            else
+              PROFILE_FILENAME="profile-\${{ github.run_id }}-\${{ github.run_attempt }}.mobileprovision"
+            fi
+            PROFILE_PATH="\$PROFILES_DIR/\$PROFILE_FILENAME"
+            if ( set -o noclobber; cat "$TEMP_PROFILE" > "\$PROFILE_PATH" ) 2>/dev/null; then
+              echo "\$PROFILE_PATH" > "$RUNNER_TEMP/provisioning_profile_path"
+              chmod 600 "\$PROFILE_PATH"
+              rm -f "$TEMP_PROFILE"
+            else
+              echo "::error::Failed to exclusively create provisioning profile at \$PROFILE_PATH."
+              rm -f "$TEMP_PROFILE" 2>/dev/null || true
+              exit 1
+            fi
             echo "Provisioned iOS distribution certificate and provisioning profile."
           fi`;
 
@@ -831,7 +848,21 @@ ${buildEnvBlock}        run: |
         run: |
           security delete-keychain "$RUNNER_TEMP/build.keychain" 2>/dev/null || true
           rm -f "$RUNNER_TEMP/cert.p12" 2>/dev/null || true
-          rm -f ~/Library/MobileDevice/Provisioning\\ Profiles/embedded.mobileprovision 2>/dev/null || true`;
+          rm -f "$RUNNER_TEMP/profile.mobileprovision" 2>/dev/null || true
+          PROFILES_DIR="$HOME/Library/MobileDevice/Provisioning Profiles"
+          if [ -f "$RUNNER_TEMP/provisioning_profile_path" ]; then
+            INSTALLED_PROFILE=\$(cat "$RUNNER_TEMP/provisioning_profile_path")
+            if [ -n "\$INSTALLED_PROFILE" ] && [ "\$(dirname "\$INSTALLED_PROFILE")" = "\$PROFILES_DIR" ]; then
+              PROFILE_FILENAME=\$(basename "\$INSTALLED_PROFILE")
+              ALLOWED_PATTERN="^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}|profile)-\${{ github.run_id }}-\${{ github.run_attempt }}\\.mobileprovision$"
+              if [[ "\$PROFILE_FILENAME" =~ \$ALLOWED_PATTERN ]]; then
+                if [ -f "\$INSTALLED_PROFILE" ]; then
+                  rm -f "\$INSTALLED_PROFILE" 2>/dev/null || true
+                fi
+              fi
+            fi
+            rm -f "$RUNNER_TEMP/provisioning_profile_path" 2>/dev/null || true
+          fi`;
 
     iosReleaseJob = `  release-ios:
     name: Build & Archive iOS Release
