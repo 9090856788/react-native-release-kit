@@ -106,7 +106,7 @@ describe('Phase H Step 3 — Isolated Packed Package Consumer Test', () => {
     }
   });
 
-  it('runs the installed CLI executable from node_modules/.bin and displays help and version 1.0.0', async () => {
+  it('runs the installed CLI executable from node_modules/.bin and displays help and current package version', async () => {
     const binPath = path.join(consumerDir, 'node_modules', '.bin', 'react-native-release-kit');
     expect(existsSync(binPath)).toBe(true);
 
@@ -119,9 +119,12 @@ describe('Phase H Step 3 — Isolated Packed Package Consumer Test', () => {
     expect(helpRes.stdout).toContain('build');
     expect(helpRes.stdout).toContain('deploy');
 
+    const rootPkg = JSON.parse(
+      await fs.readFile(path.join(repoRoot, 'package.json'), 'utf8'),
+    );
     const versionRes = await execa(binPath, ['--version'], { cwd: consumerDir });
     expect(versionRes.exitCode).toBe(0);
-    expect(versionRes.stdout.trim()).toBe('1.0.0');
+    expect(versionRes.stdout.trim()).toBe(rootPkg.version);
   });
 
   it('executes init --yes and creates valid configuration in consumer project', async () => {

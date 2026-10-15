@@ -13,7 +13,7 @@ export function createProgram(): Command {
   program
     .name('react-native-release-kit')
     .description('Opinionated, automated CI/CD and release toolkit for React Native CLI apps')
-    .version('1.0.0', '-v, --version', 'Output the current release-kit version')
+    .version(__RELEASE_KIT_VERSION__, '-v, --version', 'Output the current release-kit version')
     .option('--verbose', 'Enable verbose debug output')
     .option('--cwd <path>', 'Working directory', process.cwd())
     .hook('preAction', (thisCommand) => {

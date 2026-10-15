@@ -9,3 +9,5 @@ declare module 'js-yaml' {
   export function load(input: string, options?: LoadOptions): unknown;
   export function dump(input: unknown, options?: unknown): string;
 }
+
+declare const __RELEASE_KIT_VERSION__: string;
