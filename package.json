@@ -1,6 +1,6 @@
 {
   "name": "react-native-release-kit",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Production-ready CI/CD configuration, native builds, and store deployment for React Native CLI applications",
   "keywords": [
     "react-native",
