@@ -7,6 +7,7 @@ import { pathToFileURL } from 'node:url';
 import { tmpdir } from 'node:os';
 import { execa } from 'execa';
 import { createProgram } from '../../src/cli/index.js';
+import { buildCommand } from '../../src/commands/build.js';
 
 const repoRoot = path.resolve(__dirname, '../../');
 const packageJson = JSON.parse(readFileSync(path.join(repoRoot, 'package.json'), 'utf8'));
@@ -182,5 +183,46 @@ describe('CLI Integration', () => {
       '--provider',
       'github-actions',
     ]);
+  });
+
+  it('exposes --version-code option on build command and rejects invalid values', async () => {
+    const program = createProgram();
+    const buildCmd = program.commands.find((c) => c.name() === 'build');
+    expect(buildCmd).toBeDefined();
+    expect(buildCmd?.options.some((o) => o.flags.includes('--version-code'))).toBe(true);
+
+    await fs.writeFile(
+      path.join(testDir, 'react-native-release.config.ts'),
+      `import { defineConfig } from 'react-native-release-kit';
+export default defineConfig({
+  projectName: 'cli-test-app',
+  packageManager: 'npm',
+  android: { enabled: true },
+});
+`,
+    );
+
+    // Test rejection of non-integer string
+    const codeNaN = await buildCommand({
+      cwd: testDir,
+      platform: 'android',
+      versionCode: 'invalid',
+    });
+    expect(codeNaN).toBe(1);
+
+    // Test rejection of non-positive integer
+    const codeZero = await buildCommand({ cwd: testDir, platform: 'android', versionCode: 0 });
+    expect(codeZero).toBe(1);
+
+    const codeNegative = await buildCommand({
+      cwd: testDir,
+      platform: 'android',
+      versionCode: -42,
+    });
+    expect(codeNegative).toBe(1);
+
+    // Test rejection of float
+    const codeFloat = await buildCommand({ cwd: testDir, platform: 'android', versionCode: 12.34 });
+    expect(codeFloat).toBe(1);
   });
 });

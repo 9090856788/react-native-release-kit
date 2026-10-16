@@ -873,5 +873,75 @@ exit 1
       // If the temporary file was created during adapter.build, it should have been cleaned up in finally block
       expect(existsSync(createdKeystorePath)).toBe(false);
     });
+
+    it('injects -PversionCode and environment variables when versionCode is passed in options', async () => {
+      const logFile = path.join(testDir, 'gradlew-invocation.log');
+      await setupFakeAndroidProject({
+        gradlewScript: `#!/bin/sh
+mkdir -p app/build/outputs/bundle/release
+echo "VALID_AAB_BYTES" > app/build/outputs/bundle/release/app-release.aab
+echo "ARGS: $*" > "${logFile}"
+echo "ENV_ANDROID_VERSION_CODE: $ANDROID_VERSION_CODE" >> "${logFile}"
+echo "ENV_ORG_GRADLE_PROJECT_versionCode: $ORG_GRADLE_PROJECT_versionCode" >> "${logFile}"
+exit 0
+`,
+      });
+
+      const config = createTestConfig();
+      const adapter = new AndroidAdapter(config);
+
+      const res = await adapter.build({
+        cwd: testDir,
+        variant: 'release',
+        artifact: 'aab',
+        skipEnvCheck: true,
+        versionCode: 345,
+      });
+
+      expect(res.success).toBe(true);
+      const logContent = await fs.readFile(logFile, 'utf-8');
+      expect(logContent).toContain('-PversionCode=345');
+      expect(logContent).toContain('-PVERSION_CODE=345');
+      expect(logContent).toContain('ENV_ANDROID_VERSION_CODE: 345');
+      expect(logContent).toContain('ENV_ORG_GRADLE_PROJECT_versionCode: 345');
+    });
+
+    it('injects versionCode from environment when versionCodeSource is env', async () => {
+      const logFile = path.join(testDir, 'gradlew-invocation-env.log');
+      await setupFakeAndroidProject({
+        gradlewScript: `#!/bin/sh
+mkdir -p app/build/outputs/bundle/release
+echo "VALID_AAB_BYTES" > app/build/outputs/bundle/release/app-release.aab
+echo "ARGS: $*" > "${logFile}"
+echo "ENV_ANDROID_VERSION_CODE: $ANDROID_VERSION_CODE" >> "${logFile}"
+exit 0
+`,
+      });
+
+      const config = createTestConfig({
+        android: {
+          ...createTestConfig().android,
+          versionCodeSource: 'env',
+          versionCodeEnvName: 'RELEASE_BUILD_NUMBER',
+        },
+      });
+      const adapter = new AndroidAdapter(config);
+
+      const res = await adapter.build({
+        cwd: testDir,
+        variant: 'release',
+        artifact: 'aab',
+        skipEnvCheck: true,
+        env: {
+          ...process.env,
+          RELEASE_BUILD_NUMBER: '789',
+        },
+      });
+
+      expect(res.success).toBe(true);
+      const logContent = await fs.readFile(logFile, 'utf-8');
+      expect(logContent).toContain('-PversionCode=789');
+      expect(logContent).toContain('ENV_ANDROID_VERSION_CODE: 789');
+    });
   });
 });

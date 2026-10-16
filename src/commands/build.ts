@@ -11,6 +11,7 @@ export interface BuildCommandOptions {
   artifact?: 'aab' | 'apk' | 'ipa';
   appModule?: string;
   flavor?: string;
+  versionCode?: number | string;
   sign?: boolean;
   dryRun?: boolean;
   skipEnvCheck?: boolean;
@@ -70,6 +71,16 @@ export async function buildCommand(options: BuildCommandOptions): Promise<number
     return 1;
   }
 
+  let parsedVersionCode: number | undefined;
+  if (options.versionCode !== undefined) {
+    const rawNum = Number(options.versionCode);
+    if (!Number.isInteger(rawNum) || rawNum <= 0) {
+      logger.error(`Invalid --version-code "${options.versionCode}". Expected a positive integer.`);
+      return 1;
+    }
+    parsedVersionCode = rawNum;
+  }
+
   const adapter = new AndroidAdapter(config);
   const variant: AndroidVariant = options.variant ?? config.android.buildVariant ?? 'release';
   const artifact: AndroidArtifact =
@@ -85,6 +96,7 @@ export async function buildCommand(options: BuildCommandOptions): Promise<number
     artifact,
     appModule: options.appModule,
     flavor: options.flavor,
+    versionCode: parsedVersionCode,
     sign: options.sign,
     dryRun: options.dryRun,
     skipEnvCheck: options.skipEnvCheck,

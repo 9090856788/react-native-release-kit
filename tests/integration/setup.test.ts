@@ -475,5 +475,116 @@ export default defineConfig({
           .catch(() => false),
       ).toBe(true);
     });
+
+    it('creates root Gemfile when --fastlane is enabled and omits it when Fastlane is disabled', async () => {
+      const configContent = `
+import { defineConfig } from 'react-native-release-kit';
+export default defineConfig({
+  projectName: 'sample-fastlane-gemfile',
+  packageManager: 'npm',
+  android: {
+    enabled: true,
+    applicationId: 'com.sample.gemfileapp',
+  },
+});
+`;
+      await fs.writeFile(path.join(testDir, 'react-native-release.config.ts'), configContent);
+
+      // When fastlane is NOT enabled, Gemfile should not be created
+      const noFastlaneCode = await setupCommand({
+        cwd: testDir,
+        provider: 'none',
+        fastlane: false,
+      });
+      expect(noFastlaneCode).toBe(0);
+      expect(
+        await fs
+          .stat(path.join(testDir, 'Gemfile'))
+          .then(() => true)
+          .catch(() => false),
+      ).toBe(false);
+
+      // When fastlane IS enabled, root Gemfile should be created
+      const fastlaneCode = await setupCommand({ cwd: testDir, provider: 'none', fastlane: true });
+      expect(fastlaneCode).toBe(0);
+      const gemfilePath = path.join(testDir, 'Gemfile');
+      expect(
+        await fs
+          .stat(gemfilePath)
+          .then(() => true)
+          .catch(() => false),
+      ).toBe(true);
+
+      const gemfileContent = await fs.readFile(gemfilePath, 'utf-8');
+      expect(gemfileContent).toContain("source 'https://rubygems.org'");
+      expect(gemfileContent).toContain("gem 'fastlane'");
+    });
+
+    it('preserves existing modified root Gemfile without --force and overwrites with --force', async () => {
+      const configContent = `
+import { defineConfig } from 'react-native-release-kit';
+export default defineConfig({
+  projectName: 'sample-custom-gemfile',
+  packageManager: 'npm',
+  android: {
+    enabled: true,
+    applicationId: 'com.sample.customgemfile',
+  },
+});
+`;
+      await fs.writeFile(path.join(testDir, 'react-native-release.config.ts'), configContent);
+
+      const gemfilePath = path.join(testDir, 'Gemfile');
+      await fs.writeFile(gemfilePath, "# User custom Gemfile\ngem 'cocoapods'\n");
+
+      // Attempt setup without force -> should fail with exit code 1
+      const exitCodeFail = await setupCommand({ cwd: testDir, fastlane: true, provider: 'none' });
+      expect(exitCodeFail).toBe(1);
+
+      // Content must be untouched
+      const untouchedContent = await fs.readFile(gemfilePath, 'utf-8');
+      expect(untouchedContent).toBe("# User custom Gemfile\ngem 'cocoapods'\n");
+
+      // Attempt setup with force -> should succeed
+      const exitCodeSuccess = await setupCommand({
+        cwd: testDir,
+        fastlane: true,
+        provider: 'none',
+        force: true,
+      });
+      expect(exitCodeSuccess).toBe(0);
+
+      const overwrittenContent = await fs.readFile(gemfilePath, 'utf-8');
+      expect(overwrittenContent).toContain("gem 'fastlane'");
+      expect(overwrittenContent).not.toContain('cocoapods');
+    });
+
+    it('is idempotent for Fastlane files and Gemfile across multiple setup runs', async () => {
+      const configContent = `
+import { defineConfig } from 'react-native-release-kit';
+export default defineConfig({
+  projectName: 'sample-idempotent-fastlane',
+  packageManager: 'npm',
+  android: {
+    enabled: true,
+    applicationId: 'com.sample.idempotent',
+  },
+});
+`;
+      await fs.writeFile(path.join(testDir, 'react-native-release.config.ts'), configContent);
+
+      // First run generates files
+      const firstRun = await setupCommand({ cwd: testDir, fastlane: true, provider: 'none' });
+      expect(firstRun).toBe(0);
+
+      // Second run without force should succeed because files are identical
+      const secondRun = await setupCommand({
+        cwd: testDir,
+        fastlane: true,
+        provider: 'none',
+        force: false,
+      });
+      expect(secondRun).toBe(0);
+    });
   });
 });

@@ -29,6 +29,9 @@ export const ScriptsConfigSchema = z
   })
   .default({});
 
+export const AndroidVersionCodeSourceSchema = z.enum(['manual', 'github-run-number', 'env']);
+export type AndroidVersionCodeSource = z.infer<typeof AndroidVersionCodeSourceSchema>;
+
 export const AndroidConfigSchema = z
   .object({
     enabled: z.boolean().default(true),
@@ -70,6 +73,8 @@ export const AndroidConfigSchema = z
       .default('android'),
     publishStore: z.boolean().default(false),
     allowProductionPublish: z.boolean().default(false),
+    versionCodeSource: AndroidVersionCodeSourceSchema.default('manual'),
+    versionCodeEnvName: z.string().default('ANDROID_VERSION_CODE'),
   })
   .default({
     enabled: true,
@@ -82,6 +87,8 @@ export const AndroidConfigSchema = z
     packagePath: 'android',
     publishStore: false,
     allowProductionPublish: false,
+    versionCodeSource: 'manual',
+    versionCodeEnvName: 'ANDROID_VERSION_CODE',
   });
 
 export const IOSConfigSchema = z

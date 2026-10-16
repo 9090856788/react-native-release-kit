@@ -30,6 +30,7 @@ export interface AndroidBuildOptions {
   appModule?: string;
   flavor?: string;
   buildTask?: string;
+  versionCode?: number;
   sign?: boolean;
   timeoutMs?: number;
   dryRun?: boolean;
@@ -754,10 +755,31 @@ export class AndroidAdapter {
 
       const gradleArgs = [gradleTask, '--console=plain', ...(options.extraGradleArgs ?? [])];
 
+      let targetVersionCode = options.versionCode;
+      if (targetVersionCode === undefined) {
+        if (this.config.android.versionCodeSource === 'env') {
+          const envVarName = this.config.android.versionCodeEnvName || 'ANDROID_VERSION_CODE';
+          const envVal = env[envVarName]?.trim();
+          if (envVal && /^\d+$/.test(envVal)) {
+            targetVersionCode = parseInt(envVal, 10);
+          }
+        }
+      }
+
       const execEnv: NodeJS.ProcessEnv = {
         ...env,
         ...(provisionedKeystore?.envOverrides ?? {}),
       };
+
+      if (targetVersionCode !== undefined) {
+        gradleArgs.push(
+          `-PversionCode=${targetVersionCode}`,
+          `-PVERSION_CODE=${targetVersionCode}`,
+        );
+        execEnv.ANDROID_VERSION_CODE = String(targetVersionCode);
+        execEnv.ORG_GRADLE_PROJECT_versionCode = String(targetVersionCode);
+        execEnv.ORG_GRADLE_PROJECT_VERSION_CODE = String(targetVersionCode);
+      }
 
       logger.debug(`Running Gradle task "${gradleTask}" in ${validation.androidDir}...`);
 

@@ -105,6 +105,7 @@ export function createProgram(): Command {
     )
     .option('--module <module>', 'Android application module name (default: auto-detected or app)')
     .option('--flavor <flavor>', 'Android product flavor')
+    .option('--version-code <number>', 'Override Android versionCode for this build (integer > 0)')
     .option('--sign', 'Require and provision release signing credentials', false)
     .option('--dry-run', 'Validate prerequisites and resolve Gradle task without building', false)
     .action(async (options) => {
@@ -116,6 +117,7 @@ export function createProgram(): Command {
         artifact: options.artifact as 'aab' | 'apk' | 'ipa' | undefined,
         appModule: options.module,
         flavor: options.flavor,
+        versionCode: options.versionCode,
         sign: options.sign,
         dryRun: options.dryRun,
       });

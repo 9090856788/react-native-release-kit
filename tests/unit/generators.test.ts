@@ -544,9 +544,12 @@ describe('GitHub Actions Workflow Generators', () => {
       expect(yaml).toContain(
         "Required secret 'CUSTOM_PLAY_SA_JSON' is missing for Google Play publishing.",
       );
+      expect(yaml).toContain('Ensure Fastlane Gemfile');
       expect(yaml).toContain('Setup Ruby for Fastlane');
       expect(yaml).toContain('Publish to Google Play (internal)');
-      expect(yaml).toContain('fastlane supply --aab "$ARTIFACT_FILE"');
+      expect(yaml).toContain(
+        'npx react-native-release-kit deploy --platform android --track "internal" --release-status "draft"',
+      );
       expect(yaml).toContain('Cleanup Google Play Credentials');
     });
 
@@ -2093,6 +2096,131 @@ describe('GitHub Actions Workflow Generators', () => {
         expect(releaseYaml).toContain('if [ -n "$EFFECTIVE_TEAM_ID" ]; then');
         expect(releaseYaml).toContain('<key>teamID</key>');
         expect(releaseYaml).toContain('<string>$EFFECTIVE_TEAM_ID</string>');
+      });
+    });
+
+    describe('Android Play Store CI/CD Remediation & Version Code Automation', () => {
+      it('generates Ensure Fastlane Gemfile step before ruby/setup-ruby', () => {
+        const config = createMockConfig({
+          githubActions: {
+            ...getBaseConfig().githubActions,
+            storePublishing: true,
+          },
+          android: {
+            ...getBaseConfig().android,
+            enabled: true,
+            publishStore: true,
+          },
+        });
+        const project = createMockProject();
+
+        const releaseYaml = generateReleaseTagWorkflow(config, project);
+        expect(validateWorkflowYaml(releaseYaml).valid).toBe(true);
+
+        const ensureGemfileIdx = releaseYaml.indexOf('Ensure Fastlane Gemfile');
+        const setupRubyIdx = releaseYaml.indexOf('Setup Ruby for Fastlane');
+
+        expect(ensureGemfileIdx).toBeGreaterThan(-1);
+        expect(setupRubyIdx).toBeGreaterThan(-1);
+        expect(ensureGemfileIdx).toBeLessThan(setupRubyIdx);
+        expect(releaseYaml).toContain('if [ ! -f Gemfile ]; then');
+        expect(releaseYaml).toContain('bundler-cache: true');
+      });
+
+      it('injects version-code properties and environment variables when versionCodeSource is github-run-number', () => {
+        const config = createMockConfig({
+          android: {
+            ...getBaseConfig().android,
+            enabled: true,
+            versionCodeSource: 'github-run-number',
+          },
+        });
+        const project = createMockProject();
+
+        const releaseYaml = generateReleaseTagWorkflow(config, project);
+        expect(validateWorkflowYaml(releaseYaml).valid).toBe(true);
+
+        expect(releaseYaml).toContain('ANDROID_VERSION_CODE: ${{ github.run_number }}');
+        expect(releaseYaml).toContain('ORG_GRADLE_PROJECT_versionCode: ${{ github.run_number }}');
+        expect(releaseYaml).toContain(
+          './gradlew bundleRelease -PversionCode=${{ github.run_number }}',
+        );
+      });
+
+      it('injects version-code properties and custom environment variable when versionCodeSource is env', () => {
+        const config = createMockConfig({
+          android: {
+            ...getBaseConfig().android,
+            enabled: true,
+            versionCodeSource: 'env',
+            versionCodeEnvName: 'CUSTOM_BUILD_NUMBER',
+          },
+        });
+        const project = createMockProject();
+
+        const releaseYaml = generateReleaseTagWorkflow(config, project);
+        expect(validateWorkflowYaml(releaseYaml).valid).toBe(true);
+
+        expect(releaseYaml).toContain(
+          'ORG_GRADLE_PROJECT_versionCode: ${{ env.CUSTOM_BUILD_NUMBER }}',
+        );
+        expect(releaseYaml).toContain('./gradlew bundleRelease');
+        expect(releaseYaml).not.toContain('github.run_number');
+      });
+
+      it('keeps gradlew command unmodified when versionCodeSource is manual', () => {
+        const config = createMockConfig({
+          android: {
+            ...getBaseConfig().android,
+            enabled: true,
+            versionCodeSource: 'manual',
+          },
+        });
+        const project = createMockProject();
+
+        const releaseYaml = generateReleaseTagWorkflow(config, project);
+        expect(validateWorkflowYaml(releaseYaml).valid).toBe(true);
+
+        expect(releaseYaml).toContain('./gradlew bundleRelease');
+        expect(releaseYaml).not.toContain('-PversionCode');
+        expect(releaseYaml).not.toContain('ORG_GRADLE_PROJECT_versionCode');
+      });
+
+      it('unifies Google Play deployment around react-native-release-kit deploy and handles production confirmation', () => {
+        const config = createMockConfig({
+          githubActions: {
+            ...getBaseConfig().githubActions,
+            storePublishing: true,
+          },
+          android: {
+            ...getBaseConfig().android,
+            enabled: true,
+            publishStore: true,
+            deploymentTrack: 'production',
+            releaseStatus: 'completed',
+            allowProductionPublish: true,
+          },
+          signing: {
+            ...getBaseConfig().signing,
+            android: {
+              ...getBaseConfig().signing.android,
+              serviceAccountSecretName: 'GOOGLE_PLAY_SERVICE_ACCOUNT_JSON',
+            },
+          },
+        });
+        const project = createMockProject();
+
+        const releaseYaml = generateReleaseTagWorkflow(config, project);
+        const parsed = validateWorkflowYaml(releaseYaml);
+        expect(parsed.valid).toBe(true);
+
+        expect(releaseYaml).toContain('name: Publish to Google Play (production)');
+        expect(releaseYaml).toContain(
+          'npx react-native-release-kit deploy --platform android --track "production" --release-status "completed" --confirm-production',
+        );
+        expect(releaseYaml).toContain(
+          'GOOGLE_PLAY_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_PLAY_SERVICE_ACCOUNT_JSON }}',
+        );
       });
     });
   });

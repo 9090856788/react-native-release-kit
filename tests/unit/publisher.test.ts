@@ -527,7 +527,12 @@ android {
       const config = createTestConfig();
       const files = await generateFastlaneFiles(config, { cwd: testDir });
 
-      expect(files).toHaveLength(2);
+      expect(files).toHaveLength(3);
+      const gemfile = files.find((f) => f.relativePath === 'Gemfile');
+      expect(gemfile).toBeDefined();
+      expect(gemfile?.content).toContain("source 'https://rubygems.org'");
+      expect(gemfile?.content).toContain("gem 'fastlane'");
+
       const appfile = files.find((f) => f.relativePath === 'fastlane/Appfile');
       const fastfile = files.find((f) => f.relativePath === 'fastlane/Fastfile');
 
@@ -558,7 +563,12 @@ android {
       });
       const files = await generateFastlaneFiles(config, { cwd: testDir });
 
-      expect(files).toHaveLength(2);
+      expect(files).toHaveLength(3);
+      const gemfile = files.find((f) => f.relativePath === 'Gemfile');
+      expect(gemfile).toBeDefined();
+      expect(gemfile?.content).toContain("source 'https://rubygems.org'");
+      expect(gemfile?.content).toContain("gem 'fastlane'");
+
       const appfile = files.find((f) => f.relativePath === 'fastlane/Appfile');
       const fastfile = files.find((f) => f.relativePath === 'fastlane/Fastfile');
 
@@ -586,7 +596,12 @@ android {
       });
       const files = await generateFastlaneFiles(config, { cwd: testDir });
 
-      expect(files).toHaveLength(2);
+      expect(files).toHaveLength(3);
+      const gemfile = files.find((f) => f.relativePath === 'Gemfile');
+      expect(gemfile).toBeDefined();
+      expect(gemfile?.content).toContain("source 'https://rubygems.org'");
+      expect(gemfile?.content).toContain("gem 'fastlane'");
+
       const appfile = files.find((f) => f.relativePath === 'fastlane/Appfile');
       const fastfile = files.find((f) => f.relativePath === 'fastlane/Fastfile');
 

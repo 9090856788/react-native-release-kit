@@ -487,6 +487,8 @@ export function generateReleaseTagWorkflow(
   let buildEnvBlock = '';
   let signingCleanupStep = '';
 
+  const androidSigningEnvEntries: string[] = [];
+
   if (isSigningEnabled) {
     signingPrepareStep = `
       - name: Provision Android Signing Keystore
@@ -505,7 +507,7 @@ export function generateReleaseTagWorkflow(
           chmod 600 "$RUNNER_TEMP/release.keystore"
 
 `;
-    const androidSigningEnvEntries: string[] = [
+    androidSigningEnvEntries.push(
       `ANDROID_KEYSTORE_PATH: \${{ runner.temp }}/release.keystore`,
       `ANDROID_KEYSTORE_PASSWORD: \${{ secrets.${config.signing.android.keystorePasswordSecretName} }}`,
       `ANDROID_KEY_ALIAS: \${{ secrets.${config.signing.android.keyAliasSecretName} }}`,
@@ -518,7 +520,7 @@ export function generateReleaseTagWorkflow(
       `ORG_GRADLE_PROJECT_MYAPP_UPLOAD_STORE_PASSWORD: \${{ secrets.${config.signing.android.keystorePasswordSecretName} }}`,
       `ORG_GRADLE_PROJECT_MYAPP_UPLOAD_KEY_ALIAS: \${{ secrets.${config.signing.android.keyAliasSecretName} }}`,
       `ORG_GRADLE_PROJECT_MYAPP_UPLOAD_KEY_PASSWORD: \${{ secrets.${config.signing.android.keyPasswordSecretName} }}`,
-    ];
+    );
 
     if (config.signing.android.keystorePathEnvName !== 'ANDROID_KEYSTORE_PATH') {
       androidSigningEnvEntries.push(
@@ -541,8 +543,6 @@ export function generateReleaseTagWorkflow(
       );
     }
 
-    const uniqueEnvLines = Array.from(new Set(androidSigningEnvEntries));
-    buildEnvBlock = `        env:\n${uniqueEnvLines.map((line) => `          ${line}`).join('\n')}\n`;
     signingCleanupStep = `
 
       - name: Cleanup Signing Keystore
@@ -557,19 +557,49 @@ export function generateReleaseTagWorkflow(
 `;
   }
 
+  // Version-code automation handling for Android builds
+  const versionCodeEnvEntries: string[] = [];
+  let gradlewVersionCodeArg = '';
+
+  if (config.android.versionCodeSource === 'github-run-number') {
+    versionCodeEnvEntries.push(
+      'ANDROID_VERSION_CODE: ${{ github.run_number }}',
+      'ORG_GRADLE_PROJECT_versionCode: ${{ github.run_number }}',
+      'ORG_GRADLE_PROJECT_VERSION_CODE: ${{ github.run_number }}',
+    );
+    gradlewVersionCodeArg = ' -PversionCode=${{ github.run_number }}';
+  } else if (config.android.versionCodeSource === 'env') {
+    const envName = config.android.versionCodeEnvName || 'ANDROID_VERSION_CODE';
+    versionCodeEnvEntries.push(`ORG_GRADLE_PROJECT_versionCode: \${{ env.${envName} }}`);
+  }
+
+  const allEnvEntries = Array.from(
+    new Set([...(isSigningEnabled ? androidSigningEnvEntries : []), ...versionCodeEnvEntries]),
+  );
+  if (allEnvEntries.length > 0) {
+    buildEnvBlock = `        env:\n${allEnvEntries.map((line) => `          ${line}`).join('\n')}\n`;
+  }
+
   let storePublishingSection = '';
   if (isStorePublishing) {
     const track = config.android.deploymentTrack || 'internal';
     const releaseStatus = config.android.releaseStatus || 'draft';
     const saSecret = config.signing.android.serviceAccountSecretName;
-    const artifactFlag = isAab ? '--aab' : '--apk';
-    const pkgName =
-      config.android.applicationId || project.android.applicationId || 'com.example.app';
+    const prodConfirmFlag =
+      track === 'production' && config.android.allowProductionPublish
+        ? ' --confirm-production'
+        : '';
 
     const prodSafeguardBlock =
       track === 'production'
         ? `          if [ "${config.android.allowProductionPublish ? 'true' : 'false'}" != "true" ]; then\n            echo "::error::Production track publishing is blocked by default to prevent accidental store rollouts. Set 'android.allowProductionPublish: true' in react-native-release.config.ts to authorize production deployment."\n            exit 1\n          fi\n`
         : '';
+
+    const publishEnvEntries = [`${saSecret}: \${{ secrets.${saSecret} }}`];
+    if (saSecret !== 'GOOGLE_PLAY_SERVICE_ACCOUNT_JSON') {
+      publishEnvEntries.push(`GOOGLE_PLAY_SERVICE_ACCOUNT_JSON: \${{ secrets.${saSecret} }}`);
+    }
+    const publishEnvBlock = publishEnvEntries.map((e) => `          ${e}`).join('\n');
 
     storePublishingSection = `
 
@@ -607,6 +637,13 @@ export function generateReleaseTagWorkflow(
           fi
           echo "Store credentials verified successfully."
 
+      - name: Ensure Fastlane Gemfile
+        run: |
+          if [ ! -f Gemfile ]; then
+            echo "::notice::No Gemfile found; creating default Fastlane Gemfile for Bundler."
+            printf 'source "https://rubygems.org"\\n\\ngem "fastlane"\\n' > Gemfile
+          fi
+
       - name: Setup Ruby for Fastlane
         uses: ${GITHUB_ACTIONS_SHAS.setupRuby}
         with:
@@ -615,12 +652,9 @@ export function generateReleaseTagWorkflow(
 
       - name: Publish to Google Play (${track})
         env:
-          PLAY_SERVICE_ACCOUNT_JSON: \${{ secrets.${saSecret} }}
+${publishEnvBlock}
         run: |
-${prodSafeguardBlock}          echo "$PLAY_SERVICE_ACCOUNT_JSON" > "$RUNNER_TEMP/play-service-account.json"
-          chmod 600 "$RUNNER_TEMP/play-service-account.json"
-          ARTIFACT_FILE=\$(ls ${artifactPath} | head -n 1)
-          fastlane supply ${artifactFlag} "\$ARTIFACT_FILE" --track "${track}" --release_status "${releaseStatus}" --package_name "${pkgName}" --json_key "$RUNNER_TEMP/play-service-account.json" --skip_upload_metadata true --skip_upload_images true --skip_upload_screenshots true
+${prodSafeguardBlock}          npx react-native-release-kit deploy --platform android --track "${track}" --release-status "${releaseStatus}"${prodConfirmFlag}
 
       - name: Cleanup Google Play Credentials
         if: always()
@@ -654,7 +688,7 @@ ${pmSteps}
 ${signingPrepareStep}${signingNoticeStep}      - name: Build Android Release ${artifactType.toUpperCase()}
 ${buildEnvBlock}        run: |
           cd ${packagePath}
-          ./gradlew ${buildTask}
+          ./gradlew ${buildTask}${gradlewVersionCodeArg}
 
       - name: Upload Release Artifact
         uses: ${GITHUB_ACTIONS_SHAS.uploadArtifact}
